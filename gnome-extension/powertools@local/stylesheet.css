@@ -1,0 +1,115 @@
+/* SPDX-License-Identifier: MIT
+ *
+ * Gaya "dynamic island" media PowerTools. Dimuat oleh media.js saat
+ * ekstensi aktif dan dilepas lagi saat ekstensi dimatikan.
+ */
+
+/* Menempel di bawah panel seperti tetesan air: sisi atas datar menyatu
+ * dengan panel, sisi bawah bulat dan berat, dengan gradasi gelap ke bawah.
+ */
+.pt-media-island {
+    background-gradient-direction: vertical;
+    background-gradient-start: rgba(34, 34, 41, 0.97);
+    background-gradient-end: rgba(9, 9, 12, 0.98);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    border-top-width: 0;
+    border-radius: 0 0 32px 32px;
+    padding: 9px 16px 14px 16px;
+    color: #f7f7fa;
+    box-shadow: 0 14px 36px rgba(0, 0, 0, 0.55);
+}
+
+.pt-media-cover {
+    background-color: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    border-radius: 14px;
+}
+
+.pt-media-cover-icon {
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.pt-media-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #ffffff;
+}
+
+.pt-media-sub {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.58);
+}
+
+.pt-media-time {
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.52);
+}
+
+.pt-media-progress {
+    margin-top: 4px;
+}
+
+.pt-media-button {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: none;
+    border-radius: 99px;
+    background-color: transparent;
+    color: #ffffff;
+}
+
+.pt-media-button:hover {
+    background-color: rgba(255, 255, 255, 0.14);
+}
+
+.pt-media-button:active {
+    background-color: rgba(255, 255, 255, 0.24);
+}
+
+.pt-media-play {
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    border: none;
+    border-radius: 99px;
+    background-color: #f2f2f6;
+    color: #111114;
+}
+
+.pt-media-play:hover {
+    background-color: #ffffff;
+}
+
+.pt-media-play:active {
+    background-color: #dcdce2;
+}
+
+.pt-media-chips {
+    margin-top: 6px;
+}
+
+.pt-media-chip {
+    padding: 3px 8px;
+    border: none;
+    border-radius: 99px;
+    background-color: rgba(255, 255, 255, 0.10);
+    color: rgba(255, 255, 255, 0.72);
+}
+
+.pt-media-chip:hover {
+    background-color: rgba(255, 255, 255, 0.18);
+}
+
+.pt-media-chip-active {
+    background-color: #f1f1f5;
+    color: #121214;
+}
+
+.pt-media-chip-active:hover {
+    background-color: #ffffff;
+}
+
+.pt-media-chip-label {
+    font-size: 10px;
+}

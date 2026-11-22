@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.powertools"
+          path="/org/gnome/shell/extensions/powertools/">
+    <key name="toggle-clipboard" type="as">
+      <default><![CDATA[['<Super>v']]]></default>
+      <summary>Buka riwayat clipboard</summary>
+      <description>Pintasan untuk membuka popup riwayat clipboard PowerTools.</description>
+    </key>
+    <key name="toggle-launcher" type="as">
+      <default><![CDATA[['<Alt>space']]]></default>
+      <summary>Buka launcher</summary>
+      <description>Pintasan untuk membuka launcher PowerTools (PowerToys Run).</description>
+    </key>
+    <key name="pick-color" type="as">
+      <default><![CDATA[['<Super><Shift>c']]]></default>
+      <summary>Ambil warna</summary>
+      <description>Pintasan untuk color picker PowerTools.</description>
+    </key>
+    <key name="toggle-lyrics" type="as">
+      <default><![CDATA[['<Super><Shift>l']]]></default>
+      <summary>Buka lirik mengambang</summary>
+      <description>Pintasan untuk membuka/menyembunyikan jendela lirik mengambang PowerTools.</description>
+    </key>
+    <key name="app-command" type="s">
+      <default>''</default>
+      <summary>Perintah aplikasi</summary>
+      <description>Kosongkan untuk memakai lokasi instalasi default (~/.local/share/powertools/bin/powertools).</description>
+    </key>
+    <key name="media-island-enabled" type="b">
+      <default>true</default>
+      <summary>Dynamic island media</summary>
+      <description>Tampilkan widget gaya dynamic island untuk pemutar MPRIS (Spotify, browser, VLC, dll.) saat media berubah atau saat pointer berhenti di tepi atas tengah layar.</description>
+    </key>
+    <key name="media-island-hover-delay" type="i">
+      <default>1000</default>
+      <range min="0" max="10000"/>
+      <summary>Jeda hover (milidetik)</summary>
+      <description>Lama pointer harus berhenti di tepi atas tengah layar sebelum widget muncul. 0 = langsung.</description>
+    </key>
+    <key name="media-island-popup-time" type="i">
+      <default>5000</default>
+      <range min="0" max="30000"/>
+      <summary>Lama popup media berubah (milidetik)</summary>
+      <description>Berapa lama widget bertahan setelah lagu/pemutar berubah sebelum menutup sendiri.</description>
+    </key>
+  </schema>
+</schemalist>

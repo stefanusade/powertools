@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3b465c"/>
+      <stop offset="1" stop-color="#111620"/>
+    </linearGradient>
+    <linearGradient id="blade" x1="0" y1="0" x2="0.75" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.42" stop-color="#f0f5fa"/>
+      <stop offset="0.72" stop-color="#c9d5e3"/>
+      <stop offset="1" stop-color="#eef4fa"/>
+    </linearGradient>
+    <linearGradient id="tool" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#c6d1df"/>
+      <stop offset="0.5" stop-color="#7d8b9e"/>
+      <stop offset="1" stop-color="#b8c5d4"/>
+    </linearGradient>
+    <linearGradient id="red" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f56d70"/>
+      <stop offset="0.36" stop-color="#d81f26"/>
+      <stop offset="1" stop-color="#7a0c11"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="5" y="5" width="118" height="118" rx="29" fill="url(#bg)"/>
+  <rect x="5" y="5" width="118" height="118" rx="29" fill="none"
+        stroke="#ffffff" stroke-opacity="0.13" stroke-width="2"/>
+
+  <g transform="translate(64 94) rotate(-9)">
+    <ellipse cx="0" cy="19" rx="45" ry="6" fill="#000000" opacity="0.32"/>
+
+    <!-- alat pendek: pembuka kaleng -->
+    <path d="M 26,-15 L 36,-48 Q 37,-53 33.5,-49 L 17,-15 Z"
+          fill="url(#tool)"/>
+
+    <!-- bilah utama -->
+    <path d="M 29,-14
+             L -10,-60
+             C -20,-46 -26,-26 -8,-14
+             Z" fill="url(#blade)"/>
+    <!-- bevel mata pisau -->
+    <path d="M -10,-60 C -20,-46 -26,-26 -8,-14 L 4,-14
+             C -6,-26 -6,-42 -10,-60 Z" fill="#ffffff" opacity="0.55"/>
+    <!-- punggung -->
+    <path d="M 29,-14 L -10,-60" fill="none" stroke="#8fa1b6"
+          stroke-width="1.7" stroke-linecap="round" opacity="0.5"/>
+
+    <!-- gagang merah -->
+    <rect x="-46" y="-18" width="92" height="36" rx="18" fill="url(#red)"/>
+    <rect x="-43" y="-16" width="86" height="12" rx="6" fill="#ffffff"
+          opacity="0.26"/>
+    <rect x="-43" y="10" width="86" height="5" rx="2.5" fill="#000000"
+          opacity="0.2"/>
+    <circle cx="-30" cy="0" r="4.4" fill="#f5d283"/>
+    <circle cx="0" cy="0" r="4.4" fill="#f5d283"/>
+    <circle cx="30" cy="0" r="4.4" fill="#f5d283"/>
+    <!-- cincin gantungan -->
+    <circle cx="-49" cy="0" r="7" fill="none" stroke="#c6d1de"
+            stroke-width="4.2"/>
+  </g>
+</svg>

@@ -1,0 +1,8 @@
+{
+  "uuid": "powertools@local",
+  "name": "PowerTools",
+  "description": "Jembatan clipboard (Win+V), pintasan launcher (Alt+Space), color picker, dan dynamic island pemutar media untuk PowerTools.",
+  "shell-version": ["45", "46", "47", "48"],
+  "settings-schema": "org.gnome.shell.extensions.powertools",
+  "version": 1
+}
