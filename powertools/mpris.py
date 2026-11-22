@@ -24,6 +24,10 @@ OBJECT_PATH = "/org/mpris/MediaPlayer2"
 # playerctld meneruskan pemutar lain; kalau ikut dibaca lagu bisa dobel.
 EXCLUDED_PLAYERS = {"org.mpris.MediaPlayer2.playerctld"}
 
+# Batas waktu panggilan Seek/SetPosition. Pemutar normal menjawab dalam
+# hitungan milidetik; angka ini hanya supaya klik tidak pernah menggantung.
+SEEK_TIMEOUT_MS = 700
+
 
 @dataclass(slots=True)
 class Track:
@@ -38,6 +42,92 @@ class Track:
     art_url: str = ""
     # Kunci sumber yang sudah dinormalkan, mis. "spotify", "vlc", "brave".
     source: str = ""
+
+
+@dataclass(slots=True)
+class SourceInfo:
+    """Pemutar MPRIS yang sedang terbuka, untuk dropdown Pengaturan."""
+
+    source: str
+    title: str
+    artist: str
+    playing: bool
+    owner: str
+
+
+def list_sources() -> list[SourceInfo]:
+    """Daftar sumber MPRIS yang sedang terbuka.
+
+    Dipakai hanya oleh jendela Pengaturan saat tab Discord dibuka atau tombol
+    muat ulang ditekan. Query-nya sinkron dengan timeout pendek supaya tidak
+    menahan UI lama; kalau D-Bus tidak tersedia hasilnya kosong.
+    """
+    bus = session_bus()
+    if bus is None:
+        return []
+
+    try:
+        reply = bus.call_sync(
+            "org.freedesktop.DBus",
+            "/org/freedesktop/DBus",
+            "org.freedesktop.DBus",
+            "ListNames",
+            None,
+            None,
+            Gio.DBusCallFlags.NONE,
+            1200,
+            None,
+        )
+        names = _unpack(reply)[0]
+    except Exception:
+        return []
+
+    found: dict[str, SourceInfo] = {}
+    for name in names or []:
+        if not isinstance(name, str) or not name.startswith(f"{BUS_PREFIX}."):
+            continue
+        if name in EXCLUDED_PLAYERS or "playerctld" in name:
+            continue
+        try:
+            reply = bus.call_sync(
+                name,
+                OBJECT_PATH,
+                "org.freedesktop.DBus.Properties",
+                "GetAll",
+                GLib.Variant("(s)", (PLAYER_IFACE,)),
+                GLib.VariantType.new("(a{sv})"),
+                Gio.DBusCallFlags.NONE,
+                800,
+                None,
+            )
+            props = _unpack(reply)[0]
+        except Exception:
+            continue
+        if not isinstance(props, dict):
+            continue
+
+        metadata = _parse_metadata(props.get("Metadata"))
+        if metadata is None:
+            continue
+        source = source_key(
+            name, metadata["title"], metadata["album"])
+        info = SourceInfo(
+            source=source,
+            title=metadata["title"],
+            artist=metadata["artist"],
+            playing=str(props.get("PlaybackStatus") or "") == "Playing",
+            owner=name,
+        )
+        # Satu sumber bisa muncul dari beberapa instance (mis. dua tab Brave).
+        # Yang sedang memutar lebih menarik untuk ditampilkan.
+        current = found.get(source)
+        if current is None or (info.playing and not current.playing):
+            found[source] = info
+
+    return sorted(
+        found.values(),
+        key=lambda item: (not item.playing, item.source),
+    )
 
 
 def _unpack(value: object, fallback: object = None) -> object:
@@ -77,8 +167,12 @@ def _metadata(proxy: Gio.DBusProxy | None) -> dict | None:
 
 
 def _read_metadata(proxy: Gio.DBusProxy | None) -> dict | None:
-    data = _metadata(proxy)
-    if not data:
+    return _parse_metadata(_metadata(proxy))
+
+
+def _parse_metadata(data: dict | None) -> dict | None:
+    """Ubah dict Metadata MPRIS menjadi bentuk yang dipakai UI."""
+    if not isinstance(data, dict):
         return None
 
     title = str(data.get("xesam:title") or "").strip()
@@ -509,6 +603,78 @@ class MprisWatcher:
         player.position_us = max(0.0, position)
         player.position_at = GLib.get_monotonic_time()
         player.position_token += 1
+
+    # ------------------------------------------------------------------- seek
+    def seek(self, seconds: float) -> bool:
+        """Lompat ke detik tertentu pada pemutar yang sedang aktif.
+
+        ``SetPosition`` dipakai kalau pemutar memberi ``mpris:trackid`` yang
+        sah; kalau tidak, ``Seek`` relatif dihitung dari posisi perkiraan.
+        Setelah berhasil, posisi perkiraan langsung digeser dan token poll
+        dinaikkan, supaya jawaban ``Position`` yang masih di jalan tidak
+        mengembalikan lirik/island ke posisi lama.
+        """
+        if self._destroyed:
+            return False
+        player = self._active
+        if player is None or player.proxy is None:
+            return False
+
+        can_seek = player.cached("CanSeek", True)
+        if can_seek is not None and not bool(can_seek):
+            return False
+
+        try:
+            target_us = int(max(0.0, float(seconds)) * 1_000_000)
+        except (TypeError, ValueError):
+            return False
+
+        metadata = player.metadata() or {}
+        length_us = int(metadata.get("length_us") or 0)
+        if length_us > 0:
+            # Sebagian pemutar menolak posisi tepat di ujung lagu.
+            target_us = min(target_us, max(0, length_us - 1_000_000))
+
+        track_id = str(metadata.get("track_id") or "")
+        done = False
+        if track_id and not track_id.endswith("/NoTrack"):
+            done = self._call_player(
+                player,
+                "SetPosition",
+                GLib.Variant("(ox)", (track_id, target_us)),
+            )
+        if not done:
+            offset_us = target_us - int(player.estimated_position())
+            done = self._call_player(
+                player, "Seek", GLib.Variant("(x)", (offset_us,))
+            )
+        if not done:
+            return False
+
+        player.position_us = float(target_us)
+        player.position_at = GLib.get_monotonic_time()
+        player.position_token += 1
+        return True
+
+    def _call_player(
+        self, player: _Player, method: str, params: GLib.Variant
+    ) -> bool:
+        """Panggil metode pemutar tanpa pernah melempar ke pemanggil.
+
+        ``Gio.DBusProxy`` sudah terikat ke ``org.mpris.MediaPlayer2.Player``,
+        jadi argumen pertama adalah nama metode — bukan nama interface.
+        """
+        try:
+            player.proxy.call_sync(
+                method,
+                params,
+                Gio.DBusCallFlags.NONE,
+                SEEK_TIMEOUT_MS,
+                None,
+            )
+            return True
+        except (GLib.Error, TypeError, ValueError):
+            return False
 
     # --------------------------------------------------------------- position
     def _tick(self) -> bool:

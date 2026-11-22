@@ -101,3 +101,14 @@ def set_lyrics_above(above: bool, timeout_ms: int = 1500) -> bool:
 def place_lyrics_window(timeout_ms: int = 1500) -> bool:
     """Minta shell menaruh jendela lirik di kanan bawah (sekali per jendela)."""
     return _call_bridge("PlaceLyricsWindow", None, timeout_ms)
+
+
+def set_lyrics_skip_taskbar(skip: bool, timeout_ms: int = 1500) -> bool:
+    """Sembunyikan/tampilkan jendela lirik di taskbar lewat shell.
+
+    ``skip`` bernilai True berarti jendela tidak muncul di taskbar maupun
+    Alt-Tab. Tanpa ekstensi GNOME, jendela tetap tampil seperti biasa.
+    """
+    return _call_bridge(
+        "SetLyricsSkipTaskbar", GLib.Variant("(b)", (bool(skip),)), timeout_ms
+    )

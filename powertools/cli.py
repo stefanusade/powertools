@@ -322,11 +322,28 @@ def _doctor() -> int:
         for name in config.MODULES
     )
     print(f"Modul            : {modules}")
+    hide_taskbar = cfg.get("lyrics.hide_from_taskbar", True)
+    if not isinstance(hide_taskbar, bool):
+        hide_taskbar = True
+    print(
+        "Lirik taskbar    : "
+        + (
+            "disembunyikan (ikon panel tetap bisa membuka)"
+            if hide_taskbar
+            else "tampil seperti jendela biasa"
+        )
+    )
 
     if cfg.module_enabled("discord"):
         app_id = str(cfg.get("discord.app_id", "") or "").strip()
         from .discord import socket_candidates, valid_app_id
-        from .sources import BUILTIN_APP_IDS, resolve_app_id
+        from .sources import (
+            APP_PRESETS,
+            BUILTIN_APP_IDS,
+            preset_for_app_id,
+            resolve_app_id,
+            source_label,
+        )
 
         mapping = cfg.get("discord.app_ids", {})
         if not isinstance(mapping, dict):
@@ -359,13 +376,18 @@ def _doctor() -> int:
                 f"(socket {'ditemukan' if found else 'belum ada'})"
             )
         if valid_map:
-            pairs = ", ".join(sorted(valid_map))
-            print(f"Discord sumber   : {pairs} (ID sendiri)")
+            pairs = []
+            for key, value in sorted(valid_map.items()):
+                preset = preset_for_app_id(value)
+                name = preset["label"] if preset else "ID lama"
+                pairs.append(f"{source_label(key)}={name}")
+            print(f"Discord sumber   : {', '.join(pairs)}")
         if use_builtin:
             pairs = ", ".join(
-                f"{key}={value}" for key, value in sorted(BUILTIN_APP_IDS.items())
+                f"{preset['label']}={preset['app_id']}"
+                for preset in APP_PRESETS
             )
-            print(f"Discord bawaan   : {pairs}")
+            print(f"Discord preset   : {pairs}")
 
         detected = _detected_source()
         if detected is not None:
@@ -377,16 +399,19 @@ def _doctor() -> int:
                 use_builtin=use_builtin,
             )
             if source in valid_map:
-                origin = "ID sendiri"
+                origin = "pilihan di Pengaturan"
             elif use_builtin and source in BUILTIN_APP_IDS:
-                origin = "bawaan"
+                origin = "preset sumber"
             elif valid_app_id(app_id):
-                origin = "ID utama"
+                origin = "ID lama"
             else:
-                origin = "bawaan default"
+                origin = "preset default"
+            preset = preset_for_app_id(app_for_source)
+            preset_name = f" — {preset['label']}" if preset else ""
             print(
-                f"Sumber terdeteksi: {source} — \"{title}\" "
-                f"({origin}, app {app_for_source or 'tidak ada'})"
+                f"Sumber terdeteksi: {source_label(source)} ({source}) "
+                f"\"{title}\" — {origin}{preset_name}, "
+                f"app {app_for_source or 'tidak ada'}"
             )
             fallback = str(cfg.get("discord.fallback_asset", "") or "").strip()
             if not bool(cfg.get("discord.show_album_art", True)):

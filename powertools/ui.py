@@ -213,6 +213,78 @@ def _css_text() -> str:
         color: {p["faint"]};
         margin: 8px 2px 0 2px;
     }}
+    /* ------------------------------------------- tab vertikal di pengaturan */
+    .pt-nav {{
+        background-color: transparent;
+    }}
+    list.pt-nav-list,
+    list.pt-nav-list > row {{
+        background-color: transparent;
+        background-image: none;
+    }}
+    list.pt-nav-list > row.pt-nav-row {{
+        padding: 7px 10px;
+        border-radius: 9px;
+        margin: 1px 0;
+    }}
+    list.pt-nav-list > row.pt-nav-row:hover {{
+        background-color: {p["hover"]};
+    }}
+    list.pt-nav-list > row.pt-nav-row:selected {{
+        background-color: {p["selected"]};
+    }}
+    .pt-nav-label {{
+        font-size: 9.4pt;
+        font-weight: 600;
+        color: {p["sub"]};
+    }}
+    list.pt-nav-list > row.pt-nav-row:hover .pt-nav-label {{
+        color: {p["text"]};
+    }}
+    list.pt-nav-list > row.pt-nav-row:selected .pt-nav-label {{
+        color: {p["accent"]};
+    }}
+    .pt-nav-dot {{
+        min-width: 7px;
+        min-height: 7px;
+        border-radius: 999px;
+        background-color: {p["accent"]};
+    }}
+    .pt-nav-dot-off {{
+        background-color: {p["faint"]};
+    }}
+    .pt-nav-sep {{
+        min-width: 1px;
+        background-color: {p["border"]};
+    }}
+    .pt-nav-version {{
+        font-size: 8pt;
+        color: {p["faint"]};
+        padding: 0 4px;
+    }}
+    .pt-banner {{
+        background-color: {p["selected"]};
+        border-radius: 8px;
+        padding: 6px 10px;
+        font-size: 8.6pt;
+        color: {p["accent"]};
+    }}
+    .pt-optrow {{
+        padding: 5px 2px;
+        min-height: 26px;
+    }}
+    scale.pt-scale {{
+        min-height: 24px;
+    }}
+    scale.pt-scale trough {{
+        min-height: 6px;
+        border-radius: 999px;
+        background-color: {p["entry_border"]};
+    }}
+    scale.pt-scale highlight {{
+        border-radius: 999px;
+        background-color: {p["accent"]};
+    }}
     entry.pt-field,
     spinbutton.pt-spin,
     dropdown.pt-drop {{

@@ -262,6 +262,8 @@ class ConfigDefaultsTests(unittest.TestCase):
         self.assertFalse(config.DEFAULTS["lyrics"]["pinned"])
         self.assertEqual(config.DEFAULTS["lyrics"]["offset_ms"], 0)
         self.assertEqual(config.DEFAULTS["lyrics"]["font_size"], 15)
+        self.assertEqual(config.DEFAULTS["lyrics"]["opacity"], 94)
+        self.assertTrue(config.DEFAULTS["lyrics"]["hide_from_taskbar"])
 
     def test_default_discord_opt_in(self):
         from powertools import config

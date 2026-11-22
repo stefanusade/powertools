@@ -572,11 +572,17 @@ class PowerToolsApp(Gtk.Application):
         if not app_id:
             raw = str(self.cfg.get("discord.app_id", "") or "").strip()
             self._stop_discord(keep_status=True)
-            self._set_discord_status(
-                "Discord Application ID tidak valid"
-                if raw
-                else "Isi Discord Application ID dulu"
-            )
+            if not self._discord_use_builtin():
+                self._set_discord_status(
+                    "Preset dimatikan dan sumber ini belum dipetakan — "
+                    "pilih preset di Pengaturan → Discord Listening"
+                )
+            else:
+                self._set_discord_status(
+                    "Discord Application ID tidak valid"
+                    if raw
+                    else "Application ID preset tidak tersedia"
+                )
             return
 
         self._discord_show_paused = bool(
@@ -672,7 +678,16 @@ class PowerToolsApp(Gtk.Application):
         # ID, karena Discord memakai nama aplikasi sebagai judul "Listening
         # to ...". Handshake harus diulang; set_app_id menangani itu.
         desired_app = self._discord_app_id_for(track)
-        if desired_app and desired_app != self._discord.app_id:
+        if not desired_app:
+            # Sumber ini sengaja tidak dikirim (preset dimatikan dan tidak ada
+            # pemetaan): hapus status yang mungkin masih tertinggal.
+            if self._discord_identity is not None:
+                self._discord_identity = None
+                self._discord_sent_at = 0.0
+                self._discord_sent_position = 0.0
+                self._discord.clear()
+            return
+        if desired_app != self._discord.app_id:
             self._discord.set_app_id(desired_app)
             self._discord_identity = None
 
@@ -742,6 +757,26 @@ class PowerToolsApp(Gtk.Application):
                 pass
         if self._lyrics_window is not None:
             self._lyrics_window.set_romanize(enabled)
+
+    def seek_lyrics(self, seconds: float) -> bool:
+        """Lompat ke detik tertentu dari jendela lirik (klik dua kali).
+
+        Jendela sudah menghitung offset lirik, jadi yang masuk ke sini adalah
+        posisi pemutar yang sebenarnya. Return False kalau pemutar tidak ada
+        atau menolak (mis. ``CanSeek`` bernilai false).
+        """
+        if self._mpris is None or not self.cfg.module_enabled("lyrics"):
+            return False
+        try:
+            target = max(0.0, float(seconds))
+        except (TypeError, ValueError):
+            return False
+        if not self._mpris.seek(target):
+            return False
+        self._lyrics_position = target
+        if self._lyrics_window is not None:
+            self._lyrics_window.set_position(target, self._lyrics_playing)
+        return True
 
     # ------------------------------------------------------------- background
     def _load_apps_async(self) -> None:

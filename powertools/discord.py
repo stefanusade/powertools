@@ -5,10 +5,11 @@ Discord desktop — termasuk versi Flatpak dan Snap — membuka Unix socket
 little-endian) diikuti payload JSON. Modul ini hanya memakai standard library,
 tidak mengirim apa pun ke internet, dan tidak butuh token/bot.
 
-Discord tetap mewajibkan **Application ID** untuk handshake. Buat aplikasi
-gratis di https://discord.com/developers/applications, beri nama "PowerTools"
-(nama aplikasi itu yang tampil sebagai "Listening to ..."), lalu salin
-Application ID ke Pengaturan PowerTools.
+Discord tetap mewajibkan **Application ID** untuk handshake. ID itu tidak
+diminta dari pengguna: PowerTools membawa beberapa preset di ``sources.py``
+(milik proyek ini), dan Pengaturan hanya memilih preset mana yang dipakai untuk
+tiap sumber. Nama aplikasi preset itulah yang tampil sebagai
+"Listening to ...".
 """
 
 from __future__ import annotations

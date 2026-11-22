@@ -5,7 +5,9 @@
 // Tugas ekstensi ini sengaja dibuat sesempit mungkin:
 //  - memantau selection CLIPBOARD dan menuliskannya ke clipboard.jsonl
 //    (di Wayland GNOME, aplikasi biasa tidak bisa memantau clipboard),
-//  - mendaftarkan hotkey global dan mengaktifkan window PowerTools.
+//  - mendaftarkan hotkey global dan mengaktifkan window PowerTools,
+//  - menaruh ikon PowerTools di panel (tray) dan menyembunyikan jendela
+//    lirik dari taskbar/Alt-Tab.
 //
 // Semua UI, pencarian, penyimpanan, dan color picker ada di aplikasi
 // Python/GTK4, jadi ekstensi ini tidak menambah beban berarti ke shell.
@@ -19,6 +21,8 @@ import St from 'gi://St';
 
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
+import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 import {MediaIsland} from './media.js';
 
@@ -48,6 +52,10 @@ const DBUS_XML = `
       <arg type="b" direction="out" name="ok"/>
     </method>
     <method name="PlaceLyricsWindow">
+      <arg type="b" direction="out" name="ok"/>
+    </method>
+    <method name="SetLyricsSkipTaskbar">
+      <arg type="b" direction="in" name="skip"/>
       <arg type="b" direction="out" name="ok"/>
     </method>
     <signal name="Changed"/>
@@ -152,6 +160,9 @@ export default class PowerToolsExtension extends Extension {
         this._nameId = 0;
         this._ensureSource = 0;
         this._media = null;
+        this._indicator = null;
+        this._windowCreatedId = 0;
+        this._hideLyricsTaskbar = true;
         this._modules = {
             clipboard: true, launcher: true, color: true, media: true, lyrics: true,
             discord: false,
@@ -175,6 +186,8 @@ export default class PowerToolsExtension extends Extension {
         this._exportDbus();
         this._watchConfig();
         this._syncModules();
+        this._createIndicator();
+        this._watchWindows();
         this._ensureAppRunning();
 
         if (this._settings) {
@@ -186,6 +199,15 @@ export default class PowerToolsExtension extends Extension {
 
     disable() {
         this._active = false;
+
+        if (this._windowCreatedId) {
+            global.display.disconnect(this._windowCreatedId);
+            this._windowCreatedId = 0;
+        }
+        if (this._indicator) {
+            this._indicator.destroy();
+            this._indicator = null;
+        }
 
         if (this._settings) {
             for (const id of this._settingsIds)
@@ -215,8 +237,12 @@ export default class PowerToolsExtension extends Extension {
         // Jendela lirik tidak boleh tetap "selalu di atas" saat jembatan mati.
         try {
             const lyrics = this._findLyricsWindow();
-            if (lyrics)
+            if (lyrics) {
                 lyrics.unmake_above();
+                // Penanda skip-taskbar milik ekstensi ini juga dilepas,
+                // supaya jendela kembali terlihat di taskbar.
+                delete lyrics.skip_taskbar;
+            }
         } catch (e) {
             // Jendela mungkin sudah hilang; tidak ada yang perlu dibersihkan.
         }
@@ -291,27 +317,33 @@ export default class PowerToolsExtension extends Extension {
         ]);
     }
 
-    _readModules() {
-        const modules = {
-            clipboard: true, launcher: true, color: true, media: true, lyrics: true,
-            discord: false,
-        };
+    _readConfig() {
         try {
             const [ok, contents] = GLib.file_get_contents(this._configPath());
             if (!ok || !contents)
-                return modules;
+                return null;
             // GJS baru mengembalikan Uint8Array, versi lama mengembalikan string.
             const text = typeof contents === 'string'
                 ? contents
                 : new TextDecoder('utf-8').decode(contents);
             const data = JSON.parse(text);
-            const raw = data && typeof data.modules === 'object' ? data.modules : {};
-            for (const key of MODULE_KEYS) {
-                if (typeof raw[key] === 'boolean')
-                    modules[key] = raw[key];
-            }
+            return data && typeof data === 'object' ? data : null;
         } catch (e) {
-            // Berkas belum ada / JSON rusak: anggap semua modul aktif.
+            // Berkas belum ada / JSON rusak.
+            return null;
+        }
+    }
+
+    _readModules() {
+        const modules = {
+            clipboard: true, launcher: true, color: true, media: true, lyrics: true,
+            discord: false,
+        };
+        const data = this._readConfig();
+        const raw = data && typeof data.modules === 'object' ? data.modules : {};
+        for (const key of MODULE_KEYS) {
+            if (typeof raw[key] === 'boolean')
+                modules[key] = raw[key];
         }
         return modules;
     }
@@ -352,6 +384,7 @@ export default class PowerToolsExtension extends Extension {
         this._syncKeybindings();
         this._syncClipboardMonitor();
         this._syncMediaIsland();
+        this._syncLyricsTaskbar();
         if (this._anyModuleEnabled())
             this._ensureAppRunning();
     }
@@ -469,11 +502,15 @@ export default class PowerToolsExtension extends Extension {
         }
     }
 
-    _trigger(action) {
+    _trigger(action, force = false) {
         // Jaga-jaga kalau hotkey masih terdaftar saat modul baru dimatikan.
-        for (const spec of Object.values(KEYBINDINGS)) {
-            if (spec.action === action && !this._moduleEnabled(spec.module))
-                return;
+        // Menu panel memakai force: aplikasi sendiri yang menampilkan
+        // pemberitahuan "modul dimatikan" dan membuka Pengaturan.
+        if (!force) {
+            for (const spec of Object.values(KEYBINDINGS)) {
+                if (spec.action === action && !this._moduleEnabled(spec.module))
+                    return;
+            }
         }
 
         const command = this._command();
@@ -489,7 +526,9 @@ export default class PowerToolsExtension extends Extension {
             return;
         }
 
-        this._focusAppWindow(action);
+        // `quit` tidak membuka jendela apa pun; tidak perlu mengejar fokus.
+        if (action !== 'quit')
+            this._focusAppWindow(action);
     }
 
     _quote(command) {
@@ -1212,18 +1251,18 @@ export default class PowerToolsExtension extends Extension {
     _findLyricsWindow() {
         for (const actor of global.get_window_actors()) {
             const window = actor.meta_window;
-            if (!window)
-                continue;
-            let title = '';
-            try {
-                title = window.get_title() ?? '';
-            } catch (e) {
-                title = '';
-            }
-            if (title === LYRICS_TITLE)
+            if (window && this._windowTitle(window) === LYRICS_TITLE)
                 return window;
         }
         return null;
+    }
+
+    _windowTitle(window) {
+        try {
+            return window.get_title() ?? '';
+        } catch (e) {
+            return '';
+        }
     }
 
     SetLyricsAbove(above) {
@@ -1275,6 +1314,137 @@ export default class PowerToolsExtension extends Extension {
             }
         }
         return true;
+    }
+
+    // --------------------------------------------------- lirik & taskbar
+    // Di Wayland, `skip-taskbar` milik Meta.Window hanya bisa dibaca: Mutter
+    // mengisinya dari hint X11 dan tidak menyediakan setter. Karena taskbar,
+    // Alt-Tab, dan overview semuanya membaca properti itu dari JavaScript,
+    // nilainya ditimpa pada objek JS jendela lirik. Inti Mutter tetap memakai
+    // getter aslinya, jadi jendela tetap bisa difokuskan dan di-pin.
+    _readLyricsTaskbarHidden() {
+        let hidden = true;
+        const data = this._readConfig();
+        const lyrics = data && typeof data.lyrics === 'object' ? data.lyrics : {};
+        if (typeof lyrics.hide_from_taskbar === 'boolean')
+            hidden = lyrics.hide_from_taskbar;
+        return hidden;
+    }
+
+    _watchWindows() {
+        if (this._windowCreatedId)
+            return;
+        this._windowCreatedId = global.display.connect(
+            'window-created',
+            (_display, window) => this._onWindowCreated(window));
+    }
+
+    _onWindowCreated(window) {
+        if (!window)
+            return;
+        const apply = () => {
+            if (!this._active)
+                return;
+            if (this._windowTitle(window) === LYRICS_TITLE)
+                this._applyLyricsTaskbar(window);
+        };
+        // Judul dikirim beberapa saat setelah jendela dibuat; pasang penanda
+        // begitu judulnya cocok supaya ikon tidak sempat muncul di taskbar.
+        apply();
+        try {
+            window.connect('notify::title', apply);
+        } catch (e) {
+            // Jendela bisa hilang sebelum handler terpasang.
+        }
+    }
+
+    _syncLyricsTaskbar() {
+        this._hideLyricsTaskbar = this._readLyricsTaskbarHidden();
+        for (const actor of global.get_window_actors()) {
+            const window = actor.meta_window;
+            if (window && this._windowTitle(window) === LYRICS_TITLE)
+                this._applyLyricsTaskbar(window);
+        }
+    }
+
+    _applyLyricsTaskbar(window) {
+        if (!this._active)
+            return;
+        if (!this._hideLyricsTaskbar) {
+            try {
+                delete window.skip_taskbar;
+            } catch (e) {
+                // Properti bukan milik kita; tidak ada yang perlu dilepas.
+            }
+            return;
+        }
+        try {
+            Object.defineProperty(window, 'skip_taskbar', {
+                configurable: true,
+                enumerable: false,
+                value: true,
+                writable: true,
+            });
+        } catch (e) {
+            logError(e, 'PowerTools: gagal menyembunyikan lirik dari taskbar');
+        }
+    }
+
+    SetLyricsSkipTaskbar(skip) {
+        if (!this._active)
+            return false;
+        const window = this._findLyricsWindow();
+        if (!window)
+            return false;
+        this._hideLyricsTaskbar = Boolean(skip);
+        this._applyLyricsTaskbar(window);
+        return true;
+    }
+
+    // ------------------------------------------------------------ ikon panel
+    // Ikon tray kecil di panel: satu-satunya pintu masuk saat jendela lirik
+    // disembunyikan dari taskbar. Menu ini juga berguna kalau taskbar penuh.
+    _createIndicator() {
+        if (this._indicator || Main.sessionMode.isGreeter)
+            return;
+
+        // Kegagalan ikon panel tidak boleh mematikan jembatan clipboard.
+        let indicator = null;
+        try {
+            indicator = new PanelMenu.Button(0.0, 'PowerTools', false);
+            indicator.add_child(new St.Icon({
+                icon_name: APP_ID,
+                fallback_icon_name: 'edit-copy-symbolic',
+                style_class: 'system-status-icon',
+            }));
+
+            const addItem = (label, action) => {
+                const item = new PopupMenu.PopupMenuItem(label);
+                item.connect('activate', () => this._trigger(action, true));
+                indicator.menu.addMenuItem(item);
+                return item;
+            };
+
+            addItem('Buka Lirik', 'lyrics');
+            addItem('Riwayat Clipboard', 'clipboard');
+            addItem('Launcher', 'launcher');
+            addItem('Ambil Warna', 'color');
+            indicator.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+            addItem('Pengaturan', 'settings');
+            indicator.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+            addItem('Keluar PowerTools', 'quit');
+
+            Main.panel.addToStatusArea('powertools', indicator);
+            this._indicator = indicator;
+        } catch (e) {
+            logError(e, 'PowerTools: gagal menaruh ikon di panel');
+            try {
+                indicator?.destroy();
+            } catch (e2) {
+                // Indikator mungkin belum sempat terpasang.
+            }
+            this._indicator = null;
+        }
     }
 
     // ---------------------------------------------------------------- D-Bus

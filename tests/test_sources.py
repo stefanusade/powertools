@@ -9,7 +9,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from powertools.discord import valid_app_id
-from powertools.sources import BUILTIN_APP_IDS, resolve_app_id, source_key
+from powertools.sources import (
+    APP_PRESETS,
+    BUILTIN_APP_IDS,
+    PRESETS,
+    preset_for_app_id,
+    resolve_app_id,
+    source_key,
+    source_label,
+)
 
 
 class SourceKeyTests(unittest.TestCase):
@@ -151,6 +159,51 @@ class BuiltinAppIdTests(unittest.TestCase):
     def test_tanpa_sumber_memakai_cadangan(self):
         self.assertEqual(resolve_app_id(), BUILTIN_APP_IDS["default"])
         self.assertEqual(resolve_app_id("", use_builtin=False), "")
+
+
+class PresetTests(unittest.TestCase):
+    """Preset Application ID paten: GUI hanya memilih, tidak mengetik ID."""
+
+    def test_setiap_preset_punya_bentuk_lengkap(self):
+        for preset in APP_PRESETS:
+            self.assertEqual(
+                set(preset), {"key", "label", "app_id"}, preset)
+            self.assertTrue(preset["key"])
+            self.assertTrue(preset["label"])
+            self.assertTrue(valid_app_id(preset["app_id"]), preset)
+
+    def test_kunci_preset_unik(self):
+        keys = [preset["key"] for preset in APP_PRESETS]
+        self.assertEqual(len(keys), len(set(keys)))
+
+    def test_peta_bawaan_dibentuk_dari_preset(self):
+        self.assertEqual(
+            BUILTIN_APP_IDS,
+            {preset["key"]: preset["app_id"] for preset in APP_PRESETS},
+        )
+
+    def test_id_bisa_dilacak_balik_ke_preset(self):
+        for preset in APP_PRESETS:
+            found = preset_for_app_id(preset["app_id"])
+            self.assertIsNotNone(found)
+            self.assertEqual(found["key"], preset["key"])
+
+    def test_id_asing_tidak_dianggap_preset(self):
+        self.assertIsNone(preset_for_app_id("123456789012345678"))
+        self.assertIsNone(preset_for_app_id(""))
+        self.assertIsNone(preset_for_app_id(None))
+
+    def test_preset_default_tersedia_untuk_gui(self):
+        self.assertIn("default", PRESETS)
+        self.assertEqual(PRESETS["default"]["label"], "PowerTools (umum)")
+
+    def test_label_sumber_dikenal(self):
+        self.assertEqual(source_label("youtube-music"), "YouTube Music")
+        self.assertEqual(source_label("spotify"), "Spotify")
+
+    def test_label_sumber_asing_dibentuk_dari_kunci(self):
+        self.assertEqual(source_label("my-player"), "My Player")
+        self.assertEqual(source_label(""), "Tidak dikenal")
 
 
 if __name__ == "__main__":

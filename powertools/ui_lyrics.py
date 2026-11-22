@@ -4,6 +4,15 @@ Jendela ini sengaja berupa jendela GTK biasa, bukan overlay shell: dengan
 begitu pin/unpin punya arti nyata. Saat di-pin, ekstensi GNOME memanggil
 ``Meta.Window.make_above()`` sehingga jendela selalu di atas jendela lain;
 saat dilepas, jendela kembali menjadi jendela biasa yang bisa tertutup.
+
+Kepekatan latar diatur ``lyrics.opacity`` (persen). Yang dibuat tembus pandang
+hanya latar kartu; teks tetap pekat agar lirik masih terbaca di atas jendela
+terang.
+
+Baris lirik yang punya timestamp bisa diklik dua kali: pemutar MPRIS langsung
+dilompatkan ke detik baris tersebut (``mpris.MprisWatcher.seek``). Offset
+``lyrics.offset_ms`` ikut diperhitungkan supaya baris yang diklik benar-benar
+menjadi baris aktif sesudah lompat.
 """
 
 from __future__ import annotations
@@ -34,16 +43,26 @@ SHADOW_PAD = SHADOW_REACH + 5  # sisa ruang agar ujung blur tetap lembut
 if SHADOW_PAD <= SHADOW_REACH:  # jaga-jaga saat nilai diubah tangan
     raise ValueError("SHADOW_PAD harus lebih besar dari jangkauan shadow")
 
-_CSS = """
+# Kepekatan latar kartu dalam persen. Teks sengaja tidak ikut dibuat
+# transparan: lirik harus tetap terbaca di atas jendela yang terang. Di bawah
+# ~40% latar nyaris hilang dan teks putih sulit dibaca di jendela terang,
+# jadi 30% dipakai sebagai batas bawah.
+DEFAULT_OPACITY = 94
+MIN_OPACITY = 30
+
+_CSS_TEMPLATE = """
 window.pt-lyrics-window {
     background-color: transparent;
 }
 .pt-lyrics-card {
-    background-color: rgba(14, 14, 18, 0.94);
+    background-color: rgba(14, 14, 18, __CARD_ALPHA__);
     border: 1px solid rgba(255, 255, 255, 0.10);
     border-radius: 18px;
     padding: 8px 14px 10px 14px;
     color: #f4f4f7;
+    /* Saat latar dibuat sangat tembus pandang, teks putih bisa jatuh di atas
+       jendela terang. Bayangan tipis menjaga kontras tanpa menebalkan teks. */
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
     /* Jangkauan terjauh 19px (5 offset + 14 blur) dan harus muat di
        SHADOW_PAD; kalau tidak, tepinya terpotong jadi kotak kaku. */
     box-shadow:
@@ -62,6 +81,11 @@ window.pt-lyrics-window {
 .pt-lyrics-line {
     color: rgba(255, 255, 255, 0.38);
     padding: 3px 0;
+}
+/* Baris yang punya timestamp bisa diklik dua kali untuk melompat; sorotan
+   hover hanya menandai bahwa baris itu interaktif, tanpa menggeser tata letak. */
+.pt-lyrics-line:hover:not(.pt-lyrics-current) {
+    color: rgba(255, 255, 255, 0.88);
 }
 .pt-lyrics-near {
     color: rgba(255, 255, 255, 0.64);
@@ -120,6 +144,20 @@ def _format_time(seconds: float) -> str:
     return f"{total // 60}:{total % 60:02d}"
 
 
+def _clamp_opacity(value) -> int:
+    """Persen kepekatan latar kartu, selalu di antara MIN_OPACITY dan 100."""
+    try:
+        opacity = int(round(float(value)))
+    except (TypeError, ValueError):
+        return DEFAULT_OPACITY
+    return max(MIN_OPACITY, min(100, opacity))
+
+
+def _css_text(opacity: int = DEFAULT_OPACITY) -> str:
+    alpha = _clamp_opacity(opacity) / 100.0
+    return _CSS_TEMPLATE.replace("__CARD_ALPHA__", f"{alpha:.2f}")
+
+
 class LyricsWindow(Gtk.ApplicationWindow):
     def __init__(self, app: Gtk.Application, cfg: config.Config) -> None:
         super().__init__(application=app)
@@ -139,6 +177,9 @@ class LyricsWindow(Gtk.ApplicationWindow):
         self._playing = False
         self._offset_ms = int(cfg.get("lyrics.offset_ms", 0) or 0)
         self._font_size = int(cfg.get("lyrics.font_size", 15) or 15)
+        self._opacity = _clamp_opacity(cfg.get("lyrics.opacity", DEFAULT_OPACITY))
+        self._hide_from_taskbar = bool(
+            cfg.get("lyrics.hide_from_taskbar", True))
         self._pinned = bool(cfg.get("lyrics.pinned", False))
         self._syncing_pin = False
         self._romanize = bool(cfg.get("lyrics.romanize", False))
@@ -152,6 +193,11 @@ class LyricsWindow(Gtk.ApplicationWindow):
         self._place_tries = 0
         self._placed = False
         self._destroyed = False
+        self._provider: Gtk.CssProvider | None = None
+        # Pesan sementara di baris status (mis. pemutar menolak seek).
+        self._status_source = 0
+        self._status_saved = ""
+        self._flash_text = ""
 
         self.set_title(LYRICS_TITLE)
         self.set_icon_name(config.APP_ID)
@@ -177,17 +223,45 @@ class LyricsWindow(Gtk.ApplicationWindow):
 
     # ------------------------------------------------------------------- build
     def _install_css(self) -> None:
-        self._provider = Gtk.CssProvider()
+        """Pasang/perbarui stylesheet kartu sesuai kepekatan latar.
+
+        Provider dipakai ulang dan isinya di-parse ulang, bukan diganti:
+        GTK langsung membuang style yang sudah dihitung, jadi perubahan
+        kepekatan terlihat saat itu juga tanpa membangun ulang jendela.
+        """
+        provider = getattr(self, "_provider", None)
+        css = _css_text(self._opacity).encode("utf-8")
+        if provider is not None:
+            try:
+                provider.load_from_data(css)
+                return
+            except GLib.Error:
+                pass
+
+        provider = Gtk.CssProvider()
         try:
-            self._provider.load_from_data(_CSS.encode("utf-8"))
+            provider.load_from_data(css)
         except GLib.Error:
-            self._provider = None
             return
         display = Gdk.Display.get_default()
         if display is not None:
             Gtk.StyleContext.add_provider_for_display(
-                display, self._provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+                display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
             )
+        self._provider = provider
+
+    def _remove_css(self) -> None:
+        provider = getattr(self, "_provider", None)
+        self._provider = None
+        if provider is None:
+            return
+        display = Gdk.Display.get_default()
+        if display is None:
+            return
+        try:
+            Gtk.StyleContext.remove_provider_for_display(display, provider)
+        except Exception:
+            pass
 
     def _build(self) -> None:
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -380,6 +454,15 @@ class LyricsWindow(Gtk.ApplicationWindow):
             attrs = self._attrs()
             for label in self._labels:
                 label.set_attributes(attrs)
+        opacity = _clamp_opacity(
+            self._cfg.get("lyrics.opacity", DEFAULT_OPACITY))
+        if opacity != self._opacity:
+            self._opacity = opacity
+            self._install_css()
+        hide = bool(self._cfg.get("lyrics.hide_from_taskbar", True))
+        if hide != self._hide_from_taskbar:
+            self._hide_from_taskbar = hide
+            self._push_taskbar()
         self.set_pinned(bool(self._cfg.get("lyrics.pinned", False)))
         self.set_romanize(bool(self._cfg.get("lyrics.romanize", False)))
         self.set_position(self._raw_position, self._playing)
@@ -412,6 +495,7 @@ class LyricsWindow(Gtk.ApplicationWindow):
             self._place_tries = 0
             GLib.timeout_add(120, self._place_in_shell)
         self._push_pin()
+        self._push_taskbar()
         self._update_current(self._current, force=True)
 
     def hide_window(self) -> None:
@@ -456,6 +540,26 @@ class LyricsWindow(Gtk.ApplicationWindow):
 
     def _retry_pin(self, retries: int) -> bool:
         self._push_pin(retries)
+        return GLib.SOURCE_REMOVE
+
+    # ---------------------------------------------------------------- taskbar
+    def _push_taskbar(self, retries: int = 0) -> None:
+        """Minta shell menyembunyikan jendela ini dari taskbar (atau tidak).
+
+        Di Wayland properti ``skip-taskbar`` milik Mutter tidak bisa diubah
+        dari aplikasi; ekstensi yang menandai jendelanya. Sama seperti pin,
+        jendela baru terlihat oleh shell setelah di-present, jadi permintaan
+        diulang beberapa kali.
+        """
+        if self._destroyed or not self.get_visible():
+            return
+        if dbusutil.set_lyrics_skip_taskbar(self._hide_from_taskbar):
+            return
+        if retries < 8:
+            GLib.timeout_add(120, self._retry_taskbar, retries + 1)
+
+    def _retry_taskbar(self, retries: int) -> bool:
+        self._push_taskbar(retries)
         return GLib.SOURCE_REMOVE
 
     # ----------------------------------------------------------------- romaji
@@ -582,8 +686,9 @@ class LyricsWindow(Gtk.ApplicationWindow):
             self._status.set_label(f"Instrumental · {result.source}")
         elif synced:
             self._times = [line.time for line in synced]
-            for line in synced:
+            for index, line in enumerate(synced):
                 label = self._add_label(line.text or "♪", "pt-lyrics-line")
+                self._attach_seek(label, index)
                 self._rows.append(label)
             self._status.set_label(f"Lirik sinkron · {source}")
             self._update_current(
@@ -659,6 +764,70 @@ class LyricsWindow(Gtk.ApplicationWindow):
 
     def _add_placeholder(self, text: str) -> None:
         self._add_label(text, "pt-lyrics-plain")
+
+    # ----------------------------------------------------------- lompat waktu
+    def _attach_seek(self, row: Gtk.Label, index: int) -> None:
+        """Tandai satu baris lirik: klik dua kali = lompat ke bagian itu."""
+        gesture = Gtk.GestureClick()
+        gesture.set_button(Gdk.BUTTON_PRIMARY)
+        gesture.connect("pressed", self._on_row_pressed, index)
+        row.add_controller(gesture)
+        row.set_tooltip_text("Klik dua kali untuk melompat ke bagian ini")
+        row.set_cursor_from_name("pointer")
+
+    def _on_row_pressed(
+        self, _gesture, n_press: int, _x: float, _y: float, index: int
+    ) -> None:
+        # Klik tunggal sengaja diabaikan supaya tidak ada lompat tak sengaja
+        # hanya karena jendela tersentuh. Klik ketiga tidak mengulang seek.
+        if n_press == 2:
+            self._seek_to(index)
+
+    def _seek_to(self, index: int) -> None:
+        if self._destroyed or not 0 <= index < len(self._times):
+            return
+        # Baris yang diklik harus menjadi baris aktif tepat sesudah lompat,
+        # jadi offset lirik ikut diperhitungkan.
+        target = max(0.0, self._times[index] - self._offset_ms / 1000.0)
+        seek = getattr(self._app, "seek_lyrics", None)
+        ok = False
+        if callable(seek):
+            try:
+                ok = bool(seek(target))
+            except Exception:
+                ok = False
+        if not ok:
+            self._flash_status("Pemutar ini tidak mendukung lompat waktu")
+            return
+        # Gulir manual yang baru dilakukan tidak boleh menahan sorotan.
+        self._manual_until = 0.0
+        self.set_position(target, self._playing)
+
+    def _flash_status(self, message: str, seconds: int = 3) -> None:
+        """Tampilkan pesan sementara di baris status, lalu pulihkan."""
+        if self._destroyed:
+            return
+        if self._status_source:
+            GLib.source_remove(self._status_source)
+            self._status_source = 0
+            if self._status.get_label() == self._flash_text:
+                self._status.set_label(self._status_saved)
+        self._status_saved = self._status.get_label()
+        self._flash_text = message
+        self._status.set_label(message)
+        self._status_source = GLib.timeout_add_seconds(
+            seconds, self._restore_status
+        )
+
+    def _restore_status(self) -> bool:
+        self._status_source = 0
+        # Kalau status sudah diganti hal lain (lagu baru, lirik dimuat ulang),
+        # jangan timpa dengan teks lama.
+        if self._status.get_label() == self._flash_text:
+            self._status.set_label(self._status_saved)
+        self._flash_text = ""
+        self._status_saved = ""
+        return GLib.SOURCE_REMOVE
 
     def _clear_lines(self) -> None:
         child = self._lines_box.get_first_child()
@@ -791,13 +960,7 @@ class LyricsWindow(Gtk.ApplicationWindow):
         if self._scroll_source:
             GLib.source_remove(self._scroll_source)
             self._scroll_source = 0
-        if self._provider is not None:
-            display = Gdk.Display.get_default()
-            if display is not None:
-                try:
-                    Gtk.StyleContext.remove_provider_for_display(
-                        display, self._provider
-                    )
-                except Exception:
-                    pass
-            self._provider = None
+        if self._status_source:
+            GLib.source_remove(self._status_source)
+            self._status_source = 0
+        self._remove_css()

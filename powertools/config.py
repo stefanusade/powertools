@@ -78,22 +78,32 @@ DEFAULTS: dict[str, Any] = {
         "offset_ms": 0,
         # Ukuran teks lirik (pt).
         "font_size": 15,
+        # Kepekatan latar kartu lirik dalam persen (30–100). Teks tetap
+        # pekat; hanya latarnya yang dibuat tembus pandang supaya lirik
+        # masih terbaca di atas jendela lain.
+        "opacity": 94,
+        # Sembunyikan jendela lirik dari taskbar/Alt-Tab supaya taskbar
+        # tetap bersih. Ikon PowerTools di panel tetap bisa membukanya.
+        # Butuh ekstensi GNOME; tanpa ekstensi jendela tampil seperti biasa.
+        "hide_from_taskbar": True,
     },
     "discord": {
-        # Application ID dari https://discord.com/developers/applications.
-        # Discord menolak handshake tanpa ID yang valid; nama aplikasi di
-        # portal itulah yang tampil sebagai "Listening to ...".
+        # Application ID lama (opsional). GUI sekarang tidak lagi meminta ID
+        # diketik: semua ID berasal dari preset di sources.py. Nilai ini tetap
+        # dihormati sebagai cadangan untuk config lama dan bisa dihapus lewat
+        # Pengaturan → Discord Listening → baris "Application ID lama".
         "app_id": "",
-        # Application ID khusus per sumber, mis. {"spotify": "123..."}.
-        # Discord selalu memakai nama aplikasi sebagai judul "Listening to",
-        # jadi satu-satunya cara menampilkan "Listening to Spotify" adalah
-        # membuat aplikasi Discord bernama Spotify lalu memetakannya di sini.
-        # Kunci = nama sumber (lihat `powertools doctor`).
+        # Pemetaan sumber → Application ID. GUI hanya menawarkan Application ID
+        # preset (lihat `sources.APP_PRESETS`), jadi isinya selalu salah satu ID
+        # paten — bukan teks bebas. Kunci = nama sumber (lihat `powertools
+        # doctor`), mis. {"spotify": "1573948090166288504"}. Kunci `default`
+        # dipakai untuk sumber yang tidak punya pemetaan sendiri.
         "app_ids": {},
-        # Pakai Application ID bawaan PowerTools untuk sumber yang tidak
-        # dipetakan di atas, supaya judul "Listening to ..." sudah menyebut
-        # sumber tanpa perlu membuat aplikasi Discord sendiri. Matikan kalau
-        # ingin memakai aplikasi Discord milik Anda sepenuhnya.
+        # Pakai preset bawaan PowerTools untuk sumber yang tidak dipetakan di
+        # atas, supaya judul "Listening to ..." sudah menyebut sumber tanpa
+        # perlu membuat aplikasi Discord sendiri. Diatur lewat dropdown baris
+        # "Sumber lain" di Pengaturan. Matikan kalau ingin tidak mengirim
+        # status untuk sumber yang tidak dipetakan.
         "use_builtin_ids": True,
         # Nama asset Rich Presence yang sudah diunggah di portal, dipakai
         # kalau cover hanya tersedia sebagai file lokal (file://) sehingga

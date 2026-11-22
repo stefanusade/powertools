@@ -16,9 +16,15 @@ bukan sekadar disembunyikan:
 
 Kalau semua modul dimatikan, proses background tidak lagi ditahan
 sehingga RAM yang dipakai PowerTools kembali ke nol.
+
+Tampilan: satu tab vertikal per modul di sisi kiri, ditambah tab `Umum` untuk
+opsi aplikasi. Menambah fitur baru cukup menambah satu halaman di
+`_build_module_page()` tanpa membuat jendela makin panjang dan menyesatkan.
 """
 
 from __future__ import annotations
+
+import threading
 
 import gi
 
@@ -28,7 +34,15 @@ gi.require_version("Gdk", "4.0")
 from gi.repository import Gdk, Gio, GLib, Gtk
 
 from . import config, ui
-from .sources import BUILTIN_APP_IDS
+from .discord import valid_app_id
+from .mpris import list_sources
+from .sources import (
+    APP_PRESETS,
+    KNOWN_SOURCES,
+    PRESETS,
+    preset_for_app_id,
+    source_label,
+)
 
 SCHEMA = "org.gnome.shell.extensions.powertools"
 
@@ -141,6 +155,18 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self._save_source = 0
         self._module_switches: dict[str, Gtk.Switch] = {}
         self._module_bodies: dict[str, Gtk.Widget] = {}
+        self._module_banners: dict[str, Gtk.Widget] = {}
+        self._nav_rows: dict[str, Gtk.ListBoxRow] = {}
+        self._nav_pages: dict[Gtk.ListBoxRow, str] = {}
+        self._nav_dots: dict[str, Gtk.Widget] = {}
+        self._current_page = "general"
+        # Sumber MPRIS yang terdeteksi saat tab Discord dibuka; di-cache supaya
+        # membangun ulang baris tidak memanggil D-Bus berulang kali.
+        self._discord_detected: list = []
+        self._discord_detected_loaded = False
+        self._discord_scan_pending = False
+        self._discord_source_options: list[tuple[str, str]] = []
+        self._discord_dropdowns: dict[str, Gtk.DropDown] = {}
 
         self.set_title("PowerTools Pengaturan")
         self.set_icon_name(config.APP_ID)
@@ -148,7 +174,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self.set_decorated(False)
         self.set_resizable(True)
         self.set_default_size(
-            640 + 2 * ui.SURFACE_MARGIN, 812 + 2 * ui.SURFACE_MARGIN
+            760 + 2 * ui.SURFACE_MARGIN, 640 + 2 * ui.SURFACE_MARGIN
         )
 
         self._build()
@@ -200,50 +226,197 @@ class SettingsWindow(Gtk.ApplicationWindow):
         header.append(close)
         surface.append(header)
 
-        scroller = Gtk.ScrolledWindow()
-        scroller.add_css_class("pt-scroll")
-        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        scroller.set_vexpand(True)
-        scroller.set_child(self._build_body())
-        surface.append(scroller)
+        surface.append(self._build_body())
 
         surface.append(self._build_footer())
 
     def _build_body(self) -> Gtk.Widget:
-        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        body.set_margin_start(16)
-        body.set_margin_end(16)
-        body.set_margin_top(4)
-        body.set_margin_bottom(12)
+        body = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        body.add_css_class("pt-settings-body")
+        body.set_vexpand(True)
 
-        section = Gtk.Label(label="MODUL", xalign=0)
-        section.add_css_class("pt-section")
-        body.append(section)
-
+        self._stack = Gtk.Stack()
+        self._stack.set_hexpand(True)
+        self._stack.set_vexpand(True)
+        self._stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+        self._stack.set_transition_duration(110)
+        self._stack.add_named(self._page(self._build_general_page()), "general")
         for name in config.MODULES:
-            body.append(self._build_module_card(name))
+            self._stack.add_named(
+                self._page(self._build_module_page(name)), name)
 
-        section = Gtk.Label(label="UMUM", xalign=0)
-        section.add_css_class("pt-section")
-        section.set_margin_top(6)
-        body.append(section)
+        body.append(self._build_nav())
 
-        body.append(self._build_general_card())
+        separator = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
+        separator.add_css_class("pt-nav-sep")
+        body.append(separator)
+        body.append(self._stack)
+
+        self._select_page("general")
         return body
 
-    def _build_module_card(self, name: str) -> Gtk.Widget:
-        icon_name, shortcut, description, detail = MODULE_INFO[name]
+    # --------------------------------------------------------------------- nav
+    def _build_nav(self) -> Gtk.Widget:
+        nav = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        nav.add_css_class("pt-nav")
+        nav.set_size_request(196, -1)
+        nav.set_margin_top(4)
+        nav.set_margin_bottom(10)
+        nav.set_margin_start(8)
+        nav.set_margin_end(6)
 
-        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        card.add_css_class("pt-card")
+        listbox = Gtk.ListBox()
+        listbox.add_css_class("pt-nav-list")
+        listbox.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        listbox.set_activate_on_single_click(True)
+        listbox.connect("row-selected", self._on_nav_selected)
+        self._nav_list = listbox
+
+        self._add_nav_row(
+            listbox, "general", "preferences-system-symbolic", "Umum")
+
+        listbox.append(self._nav_heading("MODUL"))
+        for name in config.MODULES:
+            icon_name, _shortcut, description, _detail = MODULE_INFO[name]
+            row = self._add_nav_row(
+                listbox, name, icon_name, config.MODULE_LABELS[name])
+            row.set_tooltip_text(description)
+
+        nav.append(listbox)
+
+        spacer = Gtk.Box()
+        spacer.set_vexpand(True)
+        nav.append(spacer)
+        version = Gtk.Label(label=f"PowerTools {config.VERSION}", xalign=0)
+        version.add_css_class("pt-nav-version")
+        nav.append(version)
+        return nav
+
+    def _nav_heading(self, text: str) -> Gtk.Widget:
+        row = Gtk.ListBoxRow()
+        row.add_css_class("pt-nav-head")
+        row.set_selectable(False)
+        row.set_activatable(False)
+        row.set_focusable(False)
+        label = Gtk.Label(label=text, xalign=0)
+        label.add_css_class("pt-section")
+        row.set_child(label)
+        return row
+
+    def _add_nav_row(self, listbox: Gtk.ListBox, page: str, icon_name: str,
+                     label: str) -> Gtk.ListBoxRow:
+        row = Gtk.ListBoxRow()
+        row.add_css_class("pt-nav-row")
+
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        icon = Gtk.Image.new_from_icon_name(icon_name)
+        icon.set_pixel_size(16)
+        icon.set_valign(Gtk.Align.CENTER)
+        box.append(icon)
+
+        text = Gtk.Label(label=label, xalign=0)
+        text.add_css_class("pt-nav-label")
+        text.set_hexpand(True)
+        box.append(text)
+
+        if page != "general":
+            # Titik kecil: penanda modul yang sedang dimatikan, supaya tidak
+            # perlu membuka tabnya satu per satu. Modul aktif tidak diberi
+            # titik agar daftar tidak penuh warna.
+            dot = Gtk.Box()
+            dot.add_css_class("pt-nav-dot")
+            dot.add_css_class("pt-nav-dot-off")
+            dot.set_valign(Gtk.Align.CENTER)
+            dot.set_visible(False)
+            box.append(dot)
+            self._nav_dots[page] = dot
+
+        row.set_child(box)
+        listbox.append(row)
+        self._nav_rows[page] = row
+        self._nav_pages[row] = page
+        return row
+
+    def _on_nav_selected(self, _listbox: Gtk.ListBox, row) -> None:
+        page = self._nav_pages.get(row) if row is not None else None
+        if page is None:
+            return
+        self._current_page = page
+        self._stack.set_visible_child_name(page)
+        self._on_page_shown(page)
+        # Tinggi tiap kategori berbeda; sesuaikan jendela setelah transisi.
+        # Hanya setelah jendela benar-benar tampil: sebelum itu lebar alokasi
+        # masih 0 dan _fit_to_content akan mengecilkan jendela.
+        if self.get_visible() and self.get_width() > 0:
+            GLib.timeout_add(60, self._fit_to_content)
+
+    def _on_page_shown(self, page: str) -> None:
+        """Muat data yang hanya relevan saat tabnya dibuka."""
+        if page == "discord":
+            # Daftar aplikasi terbuka dipindai di background supaya jendela
+            # Pengaturan tidak menunggu D-Bus saat dibuka.
+            self._refresh_discord_detected()
+            self._rebuild_discord_sources()
+
+    def _select_page(self, page: str) -> None:
+        already = self._stack.get_visible_child_name() == page
+        row = self._nav_rows.get(page)
+        if row is not None:
+            self._nav_list.select_row(row)
+        if already:
+            # select_row tidak memancarkan "row-selected" kalau barisnya sudah
+            # terpilih, jadi hook halaman dipanggil langsung.
+            self._current_page = page
+            self._on_page_shown(page)
+
+    # ------------------------------------------------------------------- pages
+    def _page(self, content: Gtk.Widget) -> Gtk.Widget:
+        scroller = Gtk.ScrolledWindow()
+        scroller.add_css_class("pt-scroll")
+        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroller.set_vexpand(True)
+        # Halaman terlebar (Discord) tidak boleh menentukan lebar jendela;
+        # ukuran jendela diatur sendiri oleh _fit_to_content.
+        if hasattr(scroller, "set_propagate_natural_width"):
+            scroller.set_propagate_natural_width(False)
+        scroller.set_child(content)
+        return scroller
+
+    def _page_box(self) -> Gtk.Box:
+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        page.set_margin_start(16)
+        page.set_margin_end(16)
+        page.set_margin_top(10)
+        page.set_margin_bottom(14)
+        return page
+
+    def _build_general_page(self) -> Gtk.Widget:
+        page = self._page_box()
+        section = Gtk.Label(label="APLIKASI", xalign=0)
+        section.add_css_class("pt-section")
+        page.append(section)
+        page.append(self._build_general_card())
+
+        section = Gtk.Label(label="TENTANG", xalign=0)
+        section.add_css_class("pt-section")
+        page.append(section)
+        page.append(self._build_about_card())
+        return page
+
+    def _build_module_page(self, name: str) -> Gtk.Widget:
+        icon_name, shortcut, description, detail = MODULE_INFO[name]
+        page = self._page_box()
+
+        head_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        head_card.add_css_class("pt-card")
 
         head = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         image = Gtk.Image.new_from_icon_name(icon_name)
-        image.set_pixel_size(22)
+        image.set_pixel_size(24)
         image.set_valign(Gtk.Align.CENTER)
         head.append(image)
 
-        texts = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+        texts = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         texts.set_hexpand(True)
         texts.set_valign(Gtk.Align.CENTER)
 
@@ -256,13 +429,8 @@ class SettingsWindow(Gtk.ApplicationWindow):
         title_row.append(chip)
         texts.append(title_row)
 
-        subtitle = Gtk.Label(xalign=0, wrap=True, use_markup=True)
+        subtitle = Gtk.Label(label=description, xalign=0, wrap=True)
         subtitle.add_css_class("pt-row-sub")
-        subtitle.set_markup(
-            f"{GLib.markup_escape_text(description)}\n"
-            f'<span size="smaller" alpha="65%">'
-            f"{GLib.markup_escape_text(detail)}</span>"
-        )
         texts.append(subtitle)
         head.append(texts)
 
@@ -272,181 +440,190 @@ class SettingsWindow(Gtk.ApplicationWindow):
         switch.connect("notify::active", self._on_module_toggled, name)
         self._module_switches[name] = switch
         head.append(switch)
-        card.append(head)
+        head_card.append(head)
 
-        options = self._build_module_options(name)
-        options.set_margin_top(2)
+        banner = Gtk.Label(
+            label="Modul nonaktif — pengaturan di bawah belum berlaku sampai "
+                  "modul dinyalakan.",
+            xalign=0, wrap=True)
+        banner.add_css_class("pt-banner")
+        banner.set_visible(False)
+        head_card.append(banner)
+        self._module_banners[name] = banner
+        page.append(head_card)
+
+        options = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        options.add_css_class("pt-card")
+        options.append(self._build_module_options(name))
         self._module_bodies[name] = options
-        card.append(options)
+        page.append(options)
 
-        # Klik pada judul/ikon juga mengubah switch.
-        click = Gtk.GestureClick()
-        click.connect(
-            "released",
-            lambda *_args: switch.set_active(not switch.get_active()),
-        )
-        texts.add_controller(click)
+        note = Gtk.Label(label=detail, xalign=0, wrap=True)
+        note.add_css_class("pt-faint")
+        page.append(note)
+        return page
 
-        return card
+    def _sync_module_state(self, name: str) -> None:
+        """Samakan isi tab, banner, dan titik navigasi dengan saklar modul."""
+        enabled = self._cfg.module_enabled(name)
+        body = self._module_bodies.get(name)
+        if body is not None:
+            # Application ID Discord boleh diisi sebelum modul dinyalakan,
+            # karena ID itulah yang dibutuhkan untuk menyalakannya.
+            body.set_sensitive(enabled or name == "discord")
+        banner = self._module_banners.get(name)
+        if banner is not None:
+            banner.set_visible(not enabled)
+        dot = self._nav_dots.get(name)
+        if dot is not None:
+            dot.set_visible(not enabled)
 
     def _build_module_options(self, name: str) -> Gtk.Widget:
-        grid = Gtk.Grid()
-        grid.set_column_spacing(10)
-        grid.set_row_spacing(7)
-        grid.set_margin_top(3)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
 
         if name == "clipboard":
-            self._add_switch(grid, 0, 0, "Tempel otomatis setelah memilih",
+            self._add_switch(box, "Tempel otomatis setelah memilih",
                              "clipboard.auto_paste")
-            self._add_switch(grid, 0, 1, "Simpan gambar",
+            self._add_switch(box, "Simpan gambar di riwayat",
                              "clipboard.images")
-            self._add_spin(grid, 1, 0, "Maksimal item teks", "clipboard.max_items",
+            self._add_spin(box, "Maksimal item teks", "clipboard.max_items",
                            10, 5000, 10)
-            self._add_spin(grid, 1, 1, "Kedaluwarsa (menit)", "clipboard.max_age_minutes",
-                           0, 525_600, 30)
+            self._add_spin(box, "Kedaluwarsa item (menit, 0 = selamanya)",
+                           "clipboard.max_age_minutes", 0, 525_600, 30)
         elif name == "launcher":
-            self._add_spin(grid, 0, 0, "Jumlah hasil", "launcher.max_results",
+            self._add_spin(box, "Jumlah hasil", "launcher.max_results",
                            3, 30, 1)
-            label = Gtk.Label(label="URL pencarian web", xalign=0)
-            label.set_margin_top(2)
-            grid.attach(label, 0, 1, 4, 1)
-            entry = Gtk.Entry()
-            entry.add_css_class("pt-field")
-            entry.set_hexpand(True)
-            entry.set_placeholder_text("https://www.google.com/search?q={query}")
-            entry.connect("changed", self._on_value_entry, "launcher.web_search")
-            grid.attach(entry, 0, 2, 4, 1)
+            entry = self._add_entry(
+                box, "URL pencarian web", "launcher.web_search",
+                "https://www.google.com/search?q={query}")
             self._entry_launcher_web_search = entry
         elif name == "color":
-            self._add_choice(grid, 0, 0, "Format warna yang disalin",
+            self._add_choice(box, "Format warna yang disalin",
                              "color.format", list(FORMATS))
         elif name == "media":
-            self._add_gsetting_spin(grid, 0, 0, "Jeda hover (ms)",
+            self._add_gsetting_spin(box, "Jeda hover (ms)",
                                     "media-island-hover-delay", 0, 10_000, 100)
-            self._add_gsetting_spin(grid, 0, 1, "Lama popup (ms)",
+            self._add_gsetting_spin(box, "Lama popup (ms)",
                                     "media-island-popup-time", 0, 30_000, 500)
             if not self._gsettings.available:
                 note = Gtk.Label(
                     label="Pengaturan waktu island butuh ekstensi GNOME terpasang.",
                     xalign=0, wrap=True)
                 note.add_css_class("pt-faint")
-                grid.attach(note, 0, 1, 4, 1)
+                note.set_margin_top(4)
+                box.append(note)
         elif name == "lyrics":
-            self._add_switch(grid, 0, 0, "Tampilkan otomatis saat lagu diputar",
+            self._add_switch(box, "Tampilkan otomatis saat lagu diputar",
                              "lyrics.auto_show")
-            self._add_switch(grid, 0, 1, "Sematkan di atas semua jendela",
+            self._add_switch(box, "Sematkan di atas semua jendela",
                              "lyrics.pinned")
-            self._add_spin(grid, 1, 0, "Geser lirik (ms, + = lebih cepat)",
-                           "lyrics.offset_ms", -10_000, 10_000, 100)
-            self._add_spin(grid, 1, 1, "Ukuran teks (pt)",
-                           "lyrics.font_size", 9, 28, 1)
-            self._add_switch(grid, 2, 0, "Romaji untuk lagu Korea/Jepang",
+            self._add_switch(box, "Sembunyikan jendela lirik dari taskbar",
+                             "lyrics.hide_from_taskbar")
+            self._add_switch(box, "Romaji untuk lagu Korea/Jepang",
                              "lyrics.romanize")
+            self._add_spin(box, "Geser lirik (ms, + = lebih cepat)",
+                           "lyrics.offset_ms", -10_000, 10_000, 100)
+            self._add_spin(box, "Ukuran teks (pt)",
+                           "lyrics.font_size", 9, 28, 1)
+            self._add_scale(box, "Kepekatan latar (%)",
+                            "lyrics.opacity", 30, 100, 5)
+            hint = Gtk.Label(
+                label="Turunkan nilainya agar jendela di belakang lirik ikut "
+                      "terlihat. Hanya latar kartu yang dibuat tembus "
+                      "pandang; teks tetap pekat supaya mudah dibaca.",
+                xalign=0, wrap=True)
+            hint.add_css_class("pt-faint")
+            hint.set_margin_top(2)
+            box.append(hint)
+
+            seek_hint = Gtk.Label(
+                label="Klik dua kali pada baris lirik untuk melompat ke bagian "
+                      "itu (butuh pemutar yang mendukung MPRIS Seek).",
+                xalign=0, wrap=True)
+            seek_hint.add_css_class("pt-faint")
+            seek_hint.set_margin_top(4)
+            box.append(seek_hint)
         elif name == "discord":
-            return self._build_discord_options(grid)
+            return self._build_discord_options(box)
 
-        return grid
+        return box
 
-    def _build_discord_options(self, grid: Gtk.Grid) -> Gtk.Widget:
-        """Isi kartu Discord: ID utama, ID per sumber, dan opsi tampilan."""
-        label = Gtk.Label(label="Discord Application ID", xalign=0)
-        grid.attach(label, 0, 0, 4, 1)
+    # ------------------------------------------------------------- Discord
+    def _build_discord_options(self, box: Gtk.Box) -> Gtk.Widget:
+        """Isi tab Discord: pemetaan sumber ke judul Listening to.
 
-        entry = Gtk.Entry()
-        entry.add_css_class("pt-field")
-        entry.set_hexpand(True)
-        entry.set_placeholder_text("123456789012345678")
-        entry.set_tooltip_text(
-            "Application ID dari Discord Developer Portal. Nama aplikasi "
-            "di portal itulah yang tampil sebagai \"Listening to ...\"."
-        )
-        entry.connect("changed", self._on_value_entry, "discord.app_id")
-        grid.attach(entry, 0, 1, 4, 1)
-        self._entry_discord_app_id = entry
-
-        self._add_switch(grid, 0, 2, "Tampilkan saat lagu dijeda",
+        Application ID tidak lagi diketik: semua preset paten disediakan
+        PowerTools. Pengguna hanya memilih sumber mana yang memakai preset.
+        """
+        self._add_switch(box, "Tampilkan saat lagu dijeda",
                          "discord.show_paused")
-        self._add_switch(grid, 1, 2, "Tampilkan cover album",
+        self._add_switch(box, "Tampilkan cover album",
                          "discord.show_album_art")
-        self._add_switch(grid, 0, 3, "Pakai Application ID bawaan PowerTools",
-                         "discord.use_builtin_ids")
 
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        box.append(grid)
-
-        section = Gtk.Label(label="Application ID per sumber (opsional)",
-                            xalign=0)
+        section = Gtk.Label(label="Judul \"Listening to ...\"", xalign=0)
         section.add_css_class("pt-section")
         box.append(section)
 
         hint = Gtk.Label(
-            label="Discord memakai nama aplikasi sebagai judul \"Listening "
-                  "to ...\". Kalau ingin judulnya menyebut sumber, buat "
-                  "aplikasi Discord tambahan lalu petakan ID-nya di sini. "
-                  "Jangan menamainya persis seperti merek lain — Discord "
-                  "melarang impersonasi; beri label tidak resmi, mis. "
-                  "\"Spotify (unofficial)\". Baris bertanda \"bawaan\" "
-                  "disediakan PowerTools dan hanya dipakai kalau saklar di "
-                  "atas aktif.",
+            label="Judul di Discord mengikuti nama aplikasi preset, bukan "
+                  "nama pemutar. Pilih judul untuk tiap sumber; pilihan "
+                  "tersimpan dan tetap berlaku setelah PowerTools dimulai "
+                  "ulang.",
             xalign=0, wrap=True)
         hint.add_css_class("pt-faint")
         box.append(hint)
 
         self._discord_sources_box = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            orientation=Gtk.Orientation.VERTICAL, spacing=2)
         box.append(self._discord_sources_box)
 
         add_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        self._entry_discord_source_key = Gtk.Entry()
-        self._entry_discord_source_key.add_css_class("pt-field")
-        self._entry_discord_source_key.set_placeholder_text("sumber")
-        self._entry_discord_source_key.set_width_chars(12)
-        self._entry_discord_source_key.set_tooltip_text(
-            "Nama sumber seperti yang tampil di `powertools doctor`, "
-            "mis. spotify, vlc, youtube-music."
-        )
-        add_row.append(self._entry_discord_source_key)
+        add_row.set_margin_top(6)
+        self._discord_source_choice = Gtk.DropDown()
+        self._discord_source_choice.add_css_class("pt-drop")
+        self._discord_source_choice.set_hexpand(True)
+        self._discord_source_choice.set_tooltip_text(
+            "Sumber yang sedang terbuka muncul di sini. Pilih satu, lalu "
+            "tentukan judul Listening to yang dipakai.")
+        add_row.append(self._discord_source_choice)
 
-        self._entry_discord_source_id = Gtk.Entry()
-        self._entry_discord_source_id.add_css_class("pt-field")
-        self._entry_discord_source_id.set_hexpand(True)
-        self._entry_discord_source_id.set_placeholder_text("Application ID")
-        add_row.append(self._entry_discord_source_id)
+        self._discord_preset_choice = Gtk.DropDown.new_from_strings(
+            [preset["label"] for preset in APP_PRESETS])
+        self._discord_preset_choice.add_css_class("pt-drop")
+        self._discord_preset_choice.set_size_request(170, -1)
+        add_row.append(self._discord_preset_choice)
 
-        add_button = Gtk.Button(label="Tambah")
-        add_button.connect("clicked", self._on_discord_source_add)
-        add_row.append(add_button)
+        self._discord_add_button = Gtk.Button(label="Tambah")
+        self._discord_add_button.connect(
+            "clicked", self._on_discord_source_add)
+        add_row.append(self._discord_add_button)
         box.append(add_row)
 
-        asset_label = Gtk.Label(label="Asset cadangan untuk cover lokal",
-                                xalign=0)
-        asset_label.add_css_class("pt-section")
-        box.append(asset_label)
+        tools = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        tools.set_margin_top(4)
+        refresh = Gtk.Button(label="Muat ulang daftar aplikasi")
+        refresh.connect("clicked", self._on_discord_refresh)
+        tools.append(refresh)
+        self._discord_detected_label = Gtk.Label(label="", xalign=0)
+        self._discord_detected_label.add_css_class("pt-faint")
+        self._discord_detected_label.set_hexpand(True)
+        # Label ini hanya info; jangan sampai menentukan lebar jendela.
+        self._discord_detected_label.set_ellipsize(3)
+        tools.append(self._discord_detected_label)
+        box.append(tools)
 
-        asset_entry = Gtk.Entry()
-        asset_entry.add_css_class("pt-field")
-        asset_entry.set_placeholder_text("mis. music")
-        asset_entry.set_tooltip_text(
+        self._entry_discord_fallback_asset = self._add_entry(
+            box, "Asset cadangan untuk cover lokal", "discord.fallback_asset",
+            "mis. music")
+        self._entry_discord_fallback_asset.set_tooltip_text(
             "Nama asset yang diunggah di Rich Presence → Art Assets. Dipakai "
             "saat cover hanya berupa file lokal (Chromium/YouTube Music) yang "
             "tidak bisa diambil Discord, supaya tidak muncul tanda \"?\"."
         )
-        asset_entry.connect(
-            "changed", self._on_value_entry, "discord.fallback_asset")
-        box.append(asset_entry)
-        self._entry_discord_fallback_asset = asset_entry
-
-        link = Gtk.LinkButton(
-            uri="https://discord.com/developers/applications",
-            label="Buat Application ID gratis",
-        )
-        link.set_halign(Gtk.Align.START)
-        box.append(link)
 
         note = Gtk.Label(
-            label="Discord desktop harus terbuka, dan PowerTools harus "
-                  "tetap berjalan di background (resident) agar status "
-                  "terus diperbarui.",
+            label="Discord desktop harus terbuka; PowerTools tetap berjalan "
+                  "di background (resident) agar status terus diperbarui.",
             xalign=0, wrap=True)
         note.add_css_class("pt-faint")
         box.append(note)
@@ -459,114 +636,354 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self._rebuild_discord_sources()
         return box
 
-    def _rebuild_discord_sources(self) -> None:
-        """Gambar ulang daftar pemetaan sumber → Application ID."""
-        box = getattr(self, "_discord_sources_box", None)
-        if box is None:
-            return
+    @staticmethod
+    def _clear_box(box: Gtk.Box) -> None:
         child = box.get_first_child()
         while child is not None:
             following = child.get_next_sibling()
             box.remove(child)
             child = following
 
-        mapping = self._cfg.get("discord.app_ids", {})
-        if not isinstance(mapping, dict):
-            mapping = {}
-        use_builtin = self._cfg.get("discord.use_builtin_ids", True)
-        if not isinstance(use_builtin, bool):
-            use_builtin = True
+    def _discord_use_builtin(self) -> bool:
+        value = self._cfg.get("discord.use_builtin_ids", True)
+        return value if isinstance(value, bool) else True
+
+    def _discord_mapping(self) -> dict[str, str]:
+        """Peta sumber → Application ID yang valid dari config."""
+        raw = self._cfg.get("discord.app_ids", {})
+        if not isinstance(raw, dict):
+            return {}
+        result: dict[str, str] = {}
+        for key, value in raw.items():
+            if valid_app_id(value):
+                result[str(key).strip().lower()] = str(value).strip()
+        return result
+
+    def _refresh_discord_detected(self, force: bool = False) -> None:
+        """Pindai sumber MPRIS yang sedang terbuka di thread terpisah.
+
+        Query D-Bus bisa memakan beberapa detik kalau ada banyak pemutar, jadi
+        UI tidak boleh menunggunya. Hasilnya dipasang lewat main loop.
+        """
+        if self._discord_detected_loaded and not force:
+            return
+        if self._discord_scan_pending:
+            return
+        self._discord_scan_pending = True
+        label = getattr(self, "_discord_detected_label", None)
+        if label is not None:
+            label.set_label("Memindai aplikasi…")
+        threading.Thread(target=self._scan_discord_sources, daemon=True).start()
+
+    def _scan_discord_sources(self) -> None:
+        try:
+            found = list_sources()
+        except Exception:
+            found = []
+        GLib.idle_add(self._apply_discord_detected, found)
+
+    def _apply_discord_detected(self, found: list) -> bool:
+        self._discord_scan_pending = False
+        self._discord_detected = list(found)
+        self._discord_detected_loaded = True
+        try:
+            self._rebuild_discord_sources()
+        except Exception:
+            # Jendela bisa saja sudah ditutup saat pemindaian selesai.
+            pass
+        return GLib.SOURCE_REMOVE
+
+    def _rebuild_discord_sources(self) -> None:
+        """Gambar ulang daftar sumber dan dropdown preset-nya."""
+        box = getattr(self, "_discord_sources_box", None)
+        if box is None:
+            return
+        self._clear_box(box)
+        self._discord_dropdowns = {}
+
+        mapping = self._discord_mapping()
+        detected = {info.source: info for info in self._discord_detected}
+        # "default" bukan pemutar; ia cadangan untuk sumber yang tidak
+        # dipetakan, jadi ditampilkan di baris "Sumber lain", bukan sebagai
+        # baris sumber.
+        fallback_id = mapping.pop("default", "")
+        sources = sorted(
+            set(mapping) | set(detected),
+            key=lambda key: source_label(key).lower(),
+        )
 
         previous = self._loading
         self._loading = True
         try:
-            if not mapping and not use_builtin:
+            if not sources:
                 empty = Gtk.Label(
-                    label="Belum ada. Semua sumber memakai ID utama di atas.",
+                    label="Belum ada pemutar terdeteksi. Buka pemutar musik "
+                          "lalu tekan \"Muat ulang daftar aplikasi\".",
                     xalign=0, wrap=True)
                 empty.add_css_class("pt-faint")
                 box.append(empty)
-            for key in sorted(mapping):
-                box.append(
-                    self._build_discord_source_row(
-                        key, str(mapping.get(key) or "")))
-            if use_builtin:
-                for key in sorted(BUILTIN_APP_IDS):
-                    if key in mapping:
-                        continue
-                    box.append(
-                        self._build_builtin_source_row(
-                            key, BUILTIN_APP_IDS[key]))
+            for source in sources:
+                box.append(self._build_discord_source_row(
+                    source, mapping.get(source, ""), detected.get(source)))
+            box.append(self._build_discord_fallback_row(fallback_id))
+            legacy = self._build_discord_legacy_row()
+            if legacy is not None:
+                box.append(legacy)
         finally:
             self._loading = previous
 
-    def _build_builtin_source_row(self, key: str, app_id: str) -> Gtk.Widget:
-        """Baris hanya-baca untuk Application ID bawaan PowerTools."""
-        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self._refresh_discord_add_choices(sources)
+        if hasattr(self, "_discord_detected_label"):
+            count = len(self._discord_detected)
+            self._discord_detected_label.set_label(
+                f"{count} aplikasi terdeteksi" if count
+                else "Tidak ada aplikasi MPRIS yang terbuka")
 
-        name = Gtk.Label(label=key, xalign=0)
-        name.set_size_request(120, -1)
-        name.add_css_class("pt-faint")
-        row.append(name)
+    def _build_discord_source_row(self, source: str, app_id: str,
+                                  info) -> Gtk.Widget:
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        row.add_css_class("pt-optrow")
 
-        value = Gtk.Label(label=app_id, xalign=0)
-        value.set_hexpand(True)
+        texts = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+        texts.set_hexpand(True)
+        name = Gtk.Label(label=source_label(source), xalign=0)
+        name.add_css_class("pt-row-title")
+        texts.append(name)
+
+        detail_parts = []
+        if info is None:
+            detail_parts.append("tersimpan")
+        else:
+            detail_parts.append("sedang diputar" if info.playing else "terbuka")
+            if info.title:
+                detail = info.title
+                if info.artist:
+                    detail = f"{detail} — {info.artist}"
+                detail_parts.append(detail)
+        detail = Gtk.Label(label=" · ".join(detail_parts), xalign=0)
+        detail.add_css_class("pt-faint")
+        texts.append(detail)
+        row.append(texts)
+
+        labels, keys = self._discord_preset_choices(app_id)
+        dropdown = Gtk.DropDown.new_from_strings(labels)
+        dropdown.add_css_class("pt-drop")
+        dropdown.set_size_request(180, -1)
+        dropdown.set_selected(self._discord_preset_index(app_id, keys))
+        dropdown.connect(
+            "notify::selected", self._on_discord_source_preset, source, keys)
+        self._discord_dropdowns[source] = dropdown
+        row.append(dropdown)
+
+        remove = Gtk.Button(label="Hapus")
+        remove.connect("clicked", self._on_discord_source_remove, source)
+        row.append(remove)
+        return row
+
+    def _discord_preset_choices(self, app_id: str) -> tuple[list[str], list[str]]:
+        labels = ["Otomatis"] + [preset["label"] for preset in APP_PRESETS]
+        keys = [""] + [preset["key"] for preset in APP_PRESETS]
+        if app_id and preset_for_app_id(app_id) is None:
+            labels.append("Application ID lama")
+            keys.append("__legacy__")
+        return labels, keys
+
+    def _discord_preset_index(self, app_id: str, keys: list[str]) -> int:
+        if not app_id:
+            return 0
+        for index, key in enumerate(keys):
+            if key == "__legacy__":
+                return index
+            preset = PRESETS.get(key)
+            if preset is not None and preset["app_id"] == app_id:
+                return index
+        return 0
+
+    def _build_discord_fallback_row(self, default_id: str = "") -> Gtk.Widget:
+        """Baris cadangan: dipakai sumber yang tidak punya pilihan sendiri."""
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        row.add_css_class("pt-optrow")
+
+        texts = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+        texts.set_hexpand(True)
+        name = Gtk.Label(label="Sumber lain", xalign=0)
+        name.add_css_class("pt-row-title")
+        texts.append(name)
+
+        detail = Gtk.Label(
+            label="Dipakai kalau sumbernya belum punya pilihan sendiri."
+                  if self._discord_use_builtin()
+                  else "Preset dimatikan: sumber tanpa pilihan tidak dikirim "
+                       "ke Discord.",
+            xalign=0, wrap=True)
+        detail.add_css_class("pt-faint")
+        texts.append(detail)
+        row.append(texts)
+
+        labels, keys = self._discord_fallback_choices(default_id)
+        dropdown = Gtk.DropDown.new_from_strings(labels)
+        dropdown.add_css_class("pt-drop")
+        dropdown.set_size_request(180, -1)
+        dropdown.set_selected(
+            self._discord_fallback_index(default_id, keys))
+        dropdown.connect(
+            "notify::selected", self._on_discord_fallback_selected, keys)
+        self._discord_dropdowns["default"] = dropdown
+        row.append(dropdown)
+        return row
+
+    def _discord_fallback_choices(
+        self, default_id: str
+    ) -> tuple[list[str], list[str]]:
+        labels = ["Otomatis (bawaan)", "Tidak dikirim"] + [
+            preset["label"] for preset in APP_PRESETS]
+        keys = ["auto", "none"] + [preset["key"] for preset in APP_PRESETS]
+        if default_id and preset_for_app_id(default_id) is None:
+            labels.append("Application ID lama")
+            keys.append("__legacy__")
+        return labels, keys
+
+    def _discord_fallback_index(self, default_id: str, keys: list[str]) -> int:
+        if not default_id:
+            return 0 if self._discord_use_builtin() else 1
+        for index, key in enumerate(keys):
+            if key == "__legacy__":
+                return index
+            preset = PRESETS.get(key)
+            if preset is not None and preset["app_id"] == default_id:
+                return index
+        return 0
+
+    def _on_discord_fallback_selected(self, dropdown: Gtk.DropDown, _pspec,
+                                      keys: list[str]) -> None:
+        if self._loading:
+            return
+        index = int(dropdown.get_selected())
+        if index < 0 or index >= len(keys):
+            return
+        key = keys[index]
+        if key == "__legacy__":
+            return
+
+        mapping = self._discord_mapping()
+        if key == "auto":
+            mapping.pop("default", None)
+            self._cfg.set("discord.use_builtin_ids", True)
+        elif key == "none":
+            mapping.pop("default", None)
+            self._cfg.set("discord.use_builtin_ids", False)
+        else:
+            preset = PRESETS.get(key)
+            if preset is None:
+                return
+            mapping["default"] = preset["app_id"]
+        self._cfg.set("discord.app_ids", mapping)
+        self._commit()
+        self._rebuild_discord_sources()
+
+    def _build_discord_legacy_row(self) -> Gtk.Widget | None:
+        """Baris untuk `discord.app_id` lama yang masih dihormati."""
+        legacy = str(self._cfg.get("discord.app_id", "") or "").strip()
+        if not valid_app_id(legacy):
+            return None
+
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        row.add_css_class("pt-optrow")
+
+        texts = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+        texts.set_hexpand(True)
+        name = Gtk.Label(label="Application ID lama", xalign=0)
+        name.add_css_class("pt-row-title")
+        texts.append(name)
+        detail = Gtk.Label(
+            label="Dari config lama, masih dipakai kalau tidak ada preset.",
+            xalign=0, wrap=True)
+        detail.add_css_class("pt-faint")
+        texts.append(detail)
+        row.append(texts)
+
+        value = Gtk.Label(label=legacy, xalign=0)
         value.set_selectable(True)
         value.add_css_class("pt-faint")
         row.append(value)
 
-        tag = Gtk.Label(label="bawaan", xalign=1)
-        tag.add_css_class("pt-faint")
-        row.append(tag)
+        clear = Gtk.Button(label="Hapus")
+        clear.connect("clicked", self._on_discord_legacy_clear)
+        row.append(clear)
         return row
 
-    def _build_discord_source_row(self, key: str, app_id: str) -> Gtk.Widget:
-        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+    def _refresh_discord_add_choices(self, existing: list[str]) -> None:
+        """Isi dropdown "Tambah" dengan sumber yang belum punya baris.
 
-        name = Gtk.Label(label=key, xalign=0)
-        name.set_size_request(120, -1)
-        name.add_css_class("pt-faint")
-        row.append(name)
+        Sumber yang sedang terbuka sudah otomatis punya baris sendiri, jadi
+        yang tersisa di sini adalah pemutar yang sedang tidak jalan.
+        """
+        choice = getattr(self, "_discord_source_choice", None)
+        if choice is None:
+            return
 
-        entry = Gtk.Entry()
-        entry.add_css_class("pt-field")
-        entry.set_hexpand(True)
-        entry.set_placeholder_text("Application ID")
-        entry.set_text(app_id)
-        entry.connect("changed", self._on_discord_source_changed, key)
-        row.append(entry)
+        seen = set(existing)
+        options: list[tuple[str, str]] = []
+        for key in KNOWN_SOURCES:
+            if key in seen:
+                continue
+            seen.add(key)
+            options.append((key, source_label(key)))
 
-        remove = Gtk.Button(label="Hapus")
-        remove.connect("clicked", self._on_discord_source_remove, key)
-        row.append(remove)
-        return row
+        self._discord_source_options = options
+        labels = [label for _key, label in options]
+        if not labels:
+            labels = ["Semua sumber sudah terdaftar"]
+        choice.set_model(Gtk.StringList.new(labels))
+        choice.set_sensitive(bool(options))
+        if hasattr(self, "_discord_add_button"):
+            self._discord_add_button.set_sensitive(bool(options))
 
-    def _on_discord_source_changed(self, entry: Gtk.Entry, key: str) -> None:
+    def _on_discord_source_preset(self, dropdown: Gtk.DropDown, _pspec,
+                                  source: str, keys: list[str]) -> None:
         if self._loading:
             return
-        self._store_discord_source(key, entry.get_text().strip())
+        index = int(dropdown.get_selected())
+        if index < 0 or index >= len(keys):
+            return
+        key = keys[index]
+        if key == "__legacy__":
+            return
+        self._store_discord_preset(source, key)
 
     def _on_discord_source_add(self, _button: Gtk.Button) -> None:
-        key = self._entry_discord_source_key.get_text().strip().lower()
-        app_id = self._entry_discord_source_id.get_text().strip()
-        if not key or not app_id:
+        index = int(self._discord_source_choice.get_selected())
+        if index < 0 or index >= len(self._discord_source_options):
             return
-        self._store_discord_source(key, app_id)
-        self._entry_discord_source_key.set_text("")
-        self._entry_discord_source_id.set_text("")
+        source = self._discord_source_options[index][0]
+        preset_index = int(self._discord_preset_choice.get_selected())
+        if preset_index < 0 or preset_index >= len(APP_PRESETS):
+            return
+        self._store_discord_preset(source, APP_PRESETS[preset_index]["key"])
         self._rebuild_discord_sources()
 
-    def _on_discord_source_remove(self, _button: Gtk.Button, key: str) -> None:
-        self._store_discord_source(key, "")
+    def _on_discord_source_remove(self, _button: Gtk.Button,
+                                  source: str) -> None:
+        self._store_discord_preset(source, "")
         self._rebuild_discord_sources()
 
-    def _store_discord_source(self, key: str, app_id: str) -> None:
-        mapping = self._cfg.get("discord.app_ids", {})
-        mapping = dict(mapping) if isinstance(mapping, dict) else {}
-        if app_id:
-            mapping[key] = app_id
+    def _on_discord_refresh(self, _button: Gtk.Button) -> None:
+        self._refresh_discord_detected(force=True)
+
+    def _on_discord_legacy_clear(self, _button: Gtk.Button) -> None:
+        self._cfg.set("discord.app_id", "")
+        self._commit()
+        self._rebuild_discord_sources()
+
+    def _store_discord_preset(self, source: str, preset_key: str) -> None:
+        mapping = self._discord_mapping()
+        if preset_key:
+            preset = PRESETS.get(preset_key)
+            if preset is None:
+                return
+            mapping[source] = preset["app_id"]
         else:
-            mapping.pop(key, None)
+            mapping.pop(source, None)
         self._cfg.set("discord.app_ids", mapping)
         self._commit()
 
@@ -574,14 +991,13 @@ class SettingsWindow(Gtk.ApplicationWindow):
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         card.add_css_class("pt-card")
 
-        grid = Gtk.Grid()
-        grid.set_column_spacing(10)
+        options = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         self._add_switch(
-            grid, 0, 0,
+            options,
             "Tetap berjalan di background (popup instan, pakai RAM)",
             "resident",
         )
-        card.append(grid)
+        card.append(options)
 
         note = Gtk.Label(
             label="Kalau semua modul dimatikan, proses background otomatis "
@@ -590,6 +1006,29 @@ class SettingsWindow(Gtk.ApplicationWindow):
             xalign=0, wrap=True)
         note.add_css_class("pt-faint")
         card.append(note)
+        return card
+
+    def _build_about_card(self) -> Gtk.Widget:
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
+        card.add_css_class("pt-card")
+
+        rows = (
+            ("Versi", config.VERSION),
+            ("Berkas konfigurasi", str(config.CONFIG_PATH)),
+            ("Berkas data", str(config.DATA_DIR)),
+        )
+        for label, value in rows:
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+            name = Gtk.Label(label=label, xalign=0)
+            name.add_css_class("pt-row-sub")
+            name.set_size_request(132, -1)
+            row.append(name)
+            text = Gtk.Label(label=value, xalign=0, wrap=True)
+            text.add_css_class("pt-faint")
+            text.set_hexpand(True)
+            text.set_selectable(True)
+            row.append(text)
+            card.append(row)
         return card
 
     def _build_footer(self) -> Gtk.Widget:
@@ -613,56 +1052,83 @@ class SettingsWindow(Gtk.ApplicationWindow):
         return footer
 
     # ------------------------------------------------------------------ helpers
-    def _add_switch(self, grid: Gtk.Grid, row: int, col: int, label: str,
-                    dotted: str) -> None:
-        text = Gtk.Label(label=label, xalign=0)
-        text.set_hexpand(True)
-        text.set_valign(Gtk.Align.CENTER)
+    def _option_row(self, text: str, control: Gtk.Widget) -> Gtk.Box:
+        """Satu baris pengaturan: label di kiri, kontrol di kanan."""
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=14)
+        row.add_css_class("pt-optrow")
+
+        label = Gtk.Label(label=text, xalign=0)
+        label.set_wrap(True)
+        label.set_hexpand(True)
+        label.set_valign(Gtk.Align.CENTER)
+        row.append(label)
+
+        control.set_valign(Gtk.Align.CENTER)
+        control.set_halign(Gtk.Align.END)
+        row.append(control)
+        return row
+
+    def _add_switch(self, box: Gtk.Box, label: str, dotted: str) -> None:
         switch = Gtk.Switch()
-        switch.set_valign(Gtk.Align.CENTER)
-        switch.set_halign(Gtk.Align.END)
         switch.connect("notify::active", self._on_value_switch, dotted)
-        grid.attach(text, col * 2, row, 1, 1)
-        grid.attach(switch, col * 2 + 1, row, 1, 1)
+        box.append(self._option_row(label, switch))
         setattr(self, f"_sw_{dotted.replace('.', '_')}", switch)
 
-    def _add_spin(self, grid: Gtk.Grid, row: int, col: int, label: str,
-                  dotted: str, lower: int, upper: int, step: int) -> None:
-        text = Gtk.Label(label=label, xalign=0)
-        text.set_hexpand(True)
+    def _add_spin(self, box: Gtk.Box, label: str, dotted: str,
+                  lower: int, upper: int, step: int) -> None:
         spin = Gtk.SpinButton.new_with_range(lower, upper, step)
         spin.add_css_class("pt-spin")
-        spin.set_valign(Gtk.Align.CENTER)
-        spin.set_halign(Gtk.Align.END)
+        spin.set_width_chars(6)
         spin.connect("value-changed", self._on_value_spin, dotted)
-        grid.attach(text, col * 2, row, 1, 1)
-        grid.attach(spin, col * 2 + 1, row, 1, 1)
+        box.append(self._option_row(label, spin))
         setattr(self, f"_spin_{dotted.replace('.', '_')}", spin)
 
-    def _add_choice(self, grid: Gtk.Grid, row: int, col: int, label: str,
-                    dotted: str, choices: list[str]) -> None:
-        text = Gtk.Label(label=label, xalign=0)
-        text.set_hexpand(True)
+    def _add_scale(self, box: Gtk.Box, label: str, dotted: str,
+                   lower: int, upper: int, step: int) -> None:
+        scale = Gtk.Scale.new_with_range(
+            Gtk.Orientation.HORIZONTAL, lower, upper, step)
+        scale.add_css_class("pt-scale")
+        scale.set_digits(0)
+        scale.set_draw_value(True)
+        scale.set_value_pos(Gtk.PositionType.RIGHT)
+        scale.set_size_request(150, -1)
+        scale.connect("value-changed", self._on_value_scale, dotted)
+        box.append(self._option_row(label, scale))
+        setattr(self, f"_scale_{dotted.replace('.', '_')}", scale)
+
+    def _add_choice(self, box: Gtk.Box, label: str, dotted: str,
+                    choices: list[str]) -> None:
         dropdown = Gtk.DropDown.new_from_strings(choices)
         dropdown.add_css_class("pt-drop")
-        dropdown.set_valign(Gtk.Align.CENTER)
         dropdown.connect("notify::selected", self._on_value_choice, dotted, choices)
-        grid.attach(text, col * 2, row, 1, 1)
-        grid.attach(dropdown, col * 2 + 1, row, 1, 1)
+        box.append(self._option_row(label, dropdown))
         setattr(self, f"_choice_{dotted.replace('.', '_')}", dropdown)
 
-    def _add_gsetting_spin(self, grid: Gtk.Grid, row: int, col: int, label: str,
-                           key: str, lower: int, upper: int, step: int) -> None:
+    def _add_entry(self, box: Gtk.Box, label: str, dotted: str,
+                   placeholder: str = "") -> Gtk.Entry:
+        """Entry dengan label di atasnya: teks panjang butuh lebar penuh."""
         text = Gtk.Label(label=label, xalign=0)
-        text.set_hexpand(True)
+        text.set_margin_top(4)
+        box.append(text)
+
+        entry = Gtk.Entry()
+        entry.add_css_class("pt-field")
+        entry.set_hexpand(True)
+        if placeholder:
+            entry.set_placeholder_text(placeholder)
+        entry.connect("changed", self._on_value_entry, dotted)
+        box.append(entry)
+        setattr(self, f"_entry_{dotted.replace('.', '_')}", entry)
+        return entry
+
+    def _add_gsetting_spin(self, box: Gtk.Box, label: str, key: str,
+                           lower: int, upper: int, step: int) -> None:
         spin = Gtk.SpinButton.new_with_range(lower, upper, step)
         spin.add_css_class("pt-spin")
-        spin.set_valign(Gtk.Align.CENTER)
-        spin.set_halign(Gtk.Align.END)
+        spin.set_width_chars(6)
         spin.set_sensitive(self._gsettings.available)
         spin.connect("value-changed", self._on_gsetting_spin, key)
-        grid.attach(text, col * 2, row, 1, 1)
-        grid.attach(spin, col * 2 + 1, row, 1, 1)
+        box.append(self._option_row(label, spin))
         setattr(self, f"_gspin_{key.replace('-', '_')}", spin)
 
     # -------------------------------------------------------------- load/save
@@ -671,10 +1137,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         try:
             for name, switch in self._module_switches.items():
                 switch.set_active(self._cfg.module_enabled(name))
-                # Application ID Discord boleh diisi sebelum modul dinyalakan,
-                # karena ID itulah yang dibutuhkan untuk menyalakannya.
-                self._module_bodies[name].set_sensitive(
-                    self._cfg.module_enabled(name) or name == "discord")
+                self._sync_module_state(name)
 
             self._sw_clipboard_auto_paste.set_active(
                 bool(self._cfg.get("clipboard.auto_paste", True)))
@@ -703,23 +1166,23 @@ class SettingsWindow(Gtk.ApplicationWindow):
                 bool(self._cfg.get("lyrics.auto_show", False)))
             self._sw_lyrics_pinned.set_active(
                 bool(self._cfg.get("lyrics.pinned", False)))
+            self._sw_lyrics_hide_from_taskbar.set_active(
+                bool(self._cfg.get("lyrics.hide_from_taskbar", True)))
             self._spin_lyrics_offset_ms.set_value(
                 int(self._cfg.get("lyrics.offset_ms", 0) or 0))
             self._spin_lyrics_font_size.set_value(
                 int(self._cfg.get("lyrics.font_size", 15) or 15))
             self._sw_lyrics_romanize.set_active(
                 bool(self._cfg.get("lyrics.romanize", False)))
+            self._scale_lyrics_opacity.set_value(
+                int(self._cfg.get("lyrics.opacity", 94) or 94))
 
-            self._entry_discord_app_id.set_text(
-                str(self._cfg.get("discord.app_id", "") or ""))
             self._entry_discord_fallback_asset.set_text(
                 str(self._cfg.get("discord.fallback_asset", "") or ""))
             self._sw_discord_show_paused.set_active(
                 bool(self._cfg.get("discord.show_paused", False)))
             self._sw_discord_show_album_art.set_active(
                 bool(self._cfg.get("discord.show_album_art", True)))
-            self._sw_discord_use_builtin_ids.set_active(
-                bool(self._cfg.get("discord.use_builtin_ids", True)))
             self.set_discord_status(
                 getattr(self._app, "discord_status", "Nonaktif"))
 
@@ -738,7 +1201,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         if name == "media":
             # Samakan saklar lama di gsettings supaya island langsung hilang.
             self._gsettings.set_bool("media-island-enabled", value)
-        self._module_bodies[name].set_sensitive(value or name == "discord")
+        self._sync_module_state(name)
         self._commit()
 
     def _on_value_switch(self, switch: Gtk.Switch, _pspec, dotted: str) -> None:
@@ -746,14 +1209,17 @@ class SettingsWindow(Gtk.ApplicationWindow):
             return
         self._cfg.set(dotted, bool(switch.get_active()))
         self._commit()
-        if dotted == "discord.use_builtin_ids":
-            # Daftar bawaan ikut muncul/hilang.
-            self._rebuild_discord_sources()
 
     def _on_value_spin(self, spin: Gtk.SpinButton, dotted: str) -> None:
         if self._loading:
             return
         self._cfg.set(dotted, int(spin.get_value()))
+        self._commit()
+
+    def _on_value_scale(self, scale: Gtk.Scale, dotted: str) -> None:
+        if self._loading:
+            return
+        self._cfg.set(dotted, int(round(scale.get_value())))
         self._commit()
 
     def _on_value_entry(self, entry: Gtk.Entry, dotted: str) -> None:
@@ -820,22 +1286,35 @@ class SettingsWindow(Gtk.ApplicationWindow):
 
     # ------------------------------------------------------------------ events
     def _fit_to_content(self) -> bool:
-        """Sesuaikan tinggi jendela dengan isinya (dibatasi tinggi layar)."""
+        """Sesuaikan tinggi jendela dengan isi tab yang aktif."""
         try:
             root = self.get_child()
             surface = root.get_first_child()
             header = surface.get_first_child()
-            scroller = header.get_next_sibling()
-            footer = scroller.get_next_sibling()
-            body = scroller.get_child()
+            body = header.get_next_sibling()
+            footer = body.get_next_sibling()
+            page = self._stack.get_visible_child()
+            content = page.get_child() if page is not None else None
+            page_height = (
+                content.get_preferred_size()[1].height
+                if content is not None
+                else 0
+            )
             height = (
                 header.get_preferred_size()[1].height
-                + body.get_preferred_size()[1].height
+                + page_height
                 + footer.get_preferred_size()[1].height
                 + 2 * ui.SURFACE_MARGIN
-                + 4
+                + 6
             )
-            width = self.get_width()
+            # Lebar tidak diubah: kalau memakai get_width(), jendela bisa
+            # menyusut ke lebar alokasi sebelum di-map dan mengalahkan
+            # ukuran default. Setelah tampil, lebar aktual dipakai supaya
+            # ukuran hasil geser tangan pengguna tidak dikembalikan.
+            width = (
+                self.get_width() if self.get_width() > 0
+                else self.get_default_size().width
+            )
         except Exception:
             return GLib.SOURCE_REMOVE
 
@@ -853,13 +1332,14 @@ class SettingsWindow(Gtk.ApplicationWindow):
         if max_height > 0:
             height = min(height, max_height)
 
-        self.set_default_size(max(560, width), max(400, height))
+        self.set_default_size(max(600, width), max(420, height))
         return GLib.SOURCE_REMOVE
 
     def show_window(self) -> None:
         self._cfg.reload()
         self._load_values()
         self._update_status()
+        self._select_page(self._current_page)
         self.set_visible(True)
         self.present()
         # Ukuran natural baru akurat setelah widget ter-realize.

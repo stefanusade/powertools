@@ -120,17 +120,35 @@ VLC, mpv, browser, dan pemutar lain.
 Fitur ini **mati secara default**. Setelah dinyalakan, PowerTools memakai
 Application ID bawaan supaya langsung bekerja tanpa langkah tambahan:
 
-**Pengaturan** → **Discord Listening** → nyalakan saklar modul, lalu nyalakan
-**Pakai Application ID bawaan PowerTools**.
+**Pengaturan** → **Discord Listening** → nyalakan saklar modul. Status
+"Listening to ..." langsung muncul memakai preset **PowerTools (umum)**.
 
-Kalau ingin memakai aplikasi Discord milik Anda sendiri (nama dan ikon sendiri):
+Application ID **tidak perlu diketik**. Semua ID sudah paten dan disediakan
+PowerTools; yang diatur hanya **sumber mana yang memakai judul mana**.
 
-1. Buka [Discord Developer Portal](https://discord.com/developers/applications)
-   → **New Application**. Beri nama **PowerTools** — nama ini yang tampil
-   sebagai "Listening to PowerTools".
-2. Salin **Application ID** dari halaman General Information.
-3. Tempel di kolom **Discord Application ID**, lalu matikan saklar
-   **Pakai Application ID bawaan PowerTools**.
+#### Memilih sumber untuk tiap judul
+
+1. Buka **Pengaturan** → **Discord Listening**.
+2. Daftar menampilkan sumber yang sedang terbuka (Spotify, Brave, VLC, …)
+   sekaligus sumber yang sudah pernah disimpan. Tekan **Muat ulang daftar
+   aplikasi** kalau baru membuka pemutar musik.
+3. Pada baris sumber, pilih preset lewat dropdown: **Otomatis**,
+   **PowerTools (umum)**, atau **YouTube Music**.
+4. Untuk sumber yang belum ada di daftar, pilih dari dropdown aplikasi di
+   bawah daftar, pilih preset, lalu tekan **Tambah**.
+5. Baris **Sumber lain** menentukan cadangan untuk sumber yang tidak dipilih
+   sendiri: **Otomatis (bawaan)** memakai preset default, **Tidak dikirim**
+   menyembunyikan status untuk sumber tersebut, atau pilih preset tertentu.
+
+Pilihan disimpan sebagai `discord.app_ids` (sumber → Application ID preset) di
+`config.json`, jadi tetap berlaku setelah PowerTools atau sesi desktop dimulai
+ulang. **Otomatis** pada baris sumber menghapus pemetaan sumber itu dan
+mengembalikannya ke baris **Sumber lain**. Tombol **Hapus** melakukan hal yang
+sama.
+
+Kalau sebelumnya Anda mengisi `discord.app_id` sendiri, nilai itu tetap
+dihormati sebagai cadangan dan muncul sebagai baris **Application ID lama**
+dengan tombol **Hapus**. Setelah dihapus, semua sumber memakai preset.
 
 Tidak perlu bot, token, atau login. PowerTools hanya berbicara dengan Discord
 desktop lewat socket lokal (`discord-ipc-*`), termasuk versi Flatpak/Snap;
@@ -149,39 +167,44 @@ dari Developer Portal — bukan dari nama pemutar yang terdeteksi. Nama aplikasi
 tidak bisa diubah saat runtime, jadi **satu nama tambahan berarti satu
 aplikasi Discord tambahan**.
 
-PowerTools menyertakan dua Application ID bawaan:
+PowerTools menyertakan dua preset bawaan:
 
-| Kunci sumber | Nama aplikasi Discord | Dipakai untuk |
+| Kunci preset | Judul "Listening to ..." | Dipakai untuk |
 | --- | --- | --- |
+| `default` | `PowerTools` | sumber yang tidak dipetakan |
 | `youtube-music` | `YouTube Music - PowerTools` | YouTube Music |
-| `default` | `PowerTools` | semua sumber lain |
 
-Kalau ingin judulnya menyebut layanan lain, buat aplikasi Discord tambahan
-lalu petakan Application ID-nya:
+Menambah platform baru (mis. Spotify, VLC) cukup menambah satu entri di
+`APP_PRESETS` (`powertools/sources.py`). GUI dan service otomatis
+menampilkannya di dropdown, jadi tidak ada perubahan lain yang diperlukan.
+
+Kalau ingin memakai aplikasi Discord milik Anda sendiri, isi ID-nya lewat
+`discord.app_id` atau `discord.app_ids.<sumber>` di config. GUI hanya
+menawarkan preset; ID bebas tidak bisa diketik dari jendela Pengaturan.
 
 ```bash
+powertools config set discord.app_id 123456789012345678
 powertools config set discord.app_ids.spotify 123456789012345678
-powertools config set discord.app_ids.vlc 345678901234567890
 ```
 
-Di GUI ada bagian **Application ID per sumber** untuk mengisi peta yang sama.
-Kunci yang bisa dipakai adalah nama sumber yang tampil di
+Kunci sumber yang dikenali adalah nama sumber yang tampil di
 `powertools doctor` (baris **Sumber terdeteksi**), mis. `spotify`, `vlc`,
 `mpv`, `brave`, `youtube-music`, `youtube`, `soundcloud`, `tidal`, `deezer`,
 `netflix`, `twitch`.
 
 Urutan pemilihan Application ID, dari yang paling spesifik:
 
-1. `discord.app_ids.<sumber>` — pilihan Anda
-2. ID bawaan untuk sumber itu (kalau saklar bawaan aktif)
-3. `discord.app_ids.default` — cadangan pilihan Anda
-4. `discord.app_id` — ID utama Anda
-5. ID bawaan `default` (kalau saklar bawaan aktif)
+1. `discord.app_ids.<sumber>` — preset yang dipilih di Pengaturan
+2. preset untuk sumber itu (kalau saklar preset aktif)
+3. `discord.app_ids.default` — cadangan eksplisit
+4. `discord.app_id` — ID lama milik Anda
+5. preset `default` (kalau saklar preset aktif)
 
-ID bawaan per sumber sengaja berada di atas `discord.app_id` supaya YouTube
-Music tetap mendapat namanya sendiri meskipun Anda sudah mengisi ID utama.
-`discord.use_builtin_ids: false` mematikan seluruh tabel bawaan; setelah itu
-hanya `app_ids` dan `app_id` milik Anda yang dipakai.
+Preset per sumber sengaja berada di atas `discord.app_id` supaya YouTube Music
+tetap mendapat namanya sendiri meskipun Anda sudah mengisi ID lama.
+`discord.use_builtin_ids: false` mematikan seluruh preset; setelah itu hanya
+`app_ids` dan `app_id` milik Anda yang dipakai, dan sumber yang tidak dipetakan
+tidak dikirim ke Discord.
 
 > **Penting:** Discord Developer Policy pasal 12 melarang impersonasi aplikasi
 > lain ("Do not impersonate other Applications ... or Discord services"). Jadi
@@ -201,9 +224,9 @@ Browser hanya melaporkan dirinya sendiri (`brave`, `firefox`, …), bukan situs
 yang sedang diputar. PowerTools menebak situs dari judul/album — berhasil untuk
 YouTube ("… - YouTube") dan SoundCloud, tetapi **YouTube Music di browser
 biasanya hanya memberi judul lagu**, sehingga terdeteksi sebagai `brave`. Kalau
-Anda selalu memakai satu layanan di browser, petakan kunci browsernya
-(mis. `discord.app_ids.brave`). Spotify desktop, VLC, dan mpv selalu terdeteksi
-tepat.
+Anda selalu memakai satu layanan di browser, pilih baris **Brave** (atau browser
+lain) di Pengaturan lalu ganti presetnya ke **YouTube Music**. Spotify desktop,
+VLC, dan mpv selalu terdeteksi tepat.
 
 #### Cover album
 
@@ -226,9 +249,10 @@ Kalau nama asset salah, status di Pengaturan berubah menjadi
 yang tidak dikenal tanpa pesan error.
 
 Asset hanya bisa diunggah ke aplikasi Discord **milik Anda**, jadi fitur ini
-butuh `discord.use_builtin_ids: false` dan Application ID sendiri. Dengan ID
-bawaan, `fallback_asset` tidak berguna karena Anda tidak bisa mengunggah asset
-ke aplikasi milik PowerTools.
+butuh `discord.use_builtin_ids: false` dan Application ID sendiri lewat
+`discord.app_id` / `discord.app_ids.<sumber>`. Dengan preset bawaan,
+`fallback_asset` tidak berguna karena Anda tidak bisa mengunggah asset ke
+aplikasi milik PowerTools.
 
 Tanda **"?"** juga muncul kalau aplikasi Discord Anda belum punya ikon:
 unggah ikon di Developer Portal → **General Information** → **App Icon**.
@@ -247,11 +271,24 @@ gratis, tanpa API key, dan menyediakan lirik sinkron (LRC) untuk ribuan lagu.
 - Kalau lirik tidak punya timestamp, teks tetap ditampilkan (tanpa sorotan).
 - **Gulir manual** dengan roda mouse/dua jari: auto-scroll berhenti 6 detik
   supaya Anda bisa membaca bagian lain, lalu kembali mengikuti lagu.
+- **Klik dua kali pada baris lirik** untuk melompat ke bagian itu: PowerTools
+  meminta pemutar MPRIS melakukan `SetPosition` (atau `Seek` relatif kalau
+  pemutar tidak memberi track id). Baris yang diklik langsung jadi baris aktif,
+  dan offset `lyrics.offset_ms` ikut diperhitungkan. Kalau pemutar tidak
+  mendukung seek (`CanSeek: false`), status bar menampilkan pesan singkat.
 - Tombol **pin** menyematkan jendela di atas semua jendela lain; lepas pin
   untuk kembali menjadi jendela biasa yang bisa tertutup. Status pin disimpan
   di `lyrics.pinned`, jadi tetap berlaku saat dibuka lagi.
 - Offset waktu bisa digeser (`lyrics.offset_ms`) kalau lirik terasa terlalu
   cepat/lambat, dan ukuran teks diatur lewat `lyrics.font_size`.
+- **Kepekatan latar** diatur lewat `lyrics.opacity` (30–100%). Turunkan
+  nilainya supaya jendela di belakang lirik ikut terlihat. Yang dibuat tembus
+  pandang hanya latar kartunya; teks tetap pekat (dengan bayangan tipis) agar
+  lirik masih terbaca di atas jendela terang.
+- **Taskbar tetap bersih**: jendela lirik disembunyikan dari taskbar dan
+  Alt-Tab (`lyrics.hide_from_taskbar`, default aktif). Ikon PowerTools di
+  panel tetap bisa membukanya kapan saja; tanpa ekstensi GNOME, jendela
+  tampil seperti biasa.
 - **Romaji** untuk lagu Korea/Jepang: tombol `Romaji` di header (hanya muncul
   kalau versi Latin benar-benar tersedia) mengganti lirik ke huruf Latin tanpa
   mengubah sinkronisasi. Lihat [Romaji](#romaji-lagu-koreajepang).
@@ -308,8 +345,8 @@ menghapus `~/.cache/powertools/lyrics` secara manual.
 - Untuk lirik: koneksi internet saat pertama kali sebuah lagu dibuka (sesudah
   itu memakai cache). Tidak ada paket tambahan.
 - Untuk **Listening to Discord**: aplikasi Discord desktop (biasa, Flatpak,
-  atau Snap) dan satu Application ID gratis dari Discord Developer Portal.
-  Tidak ada paket tambahan.
+  atau Snap). Application ID sudah tersedia sebagai preset, jadi tidak ada
+  langkah pendaftaran. Tidak ada paket tambahan.
 
 Tidak ada dependensi Python tambahan dan tidak ada layanan cloud milik
 PowerTools. Permintaan jaringan hanya terjadi saat mengambil lirik dari API
@@ -410,6 +447,8 @@ Cek status keempat lapisan kapan saja:
 | Color picker | `Super+Shift+C` |
 | Lirik mengambang | `Super+Shift+L` |
 | Pin/unpin jendela lirik | Klik ikon pin di kanan atas jendela lirik |
+| Lompat ke bagian lirik | Klik dua kali pada baris lirik |
+| Buka lirik dari panel | Klik ikon PowerTools di panel → **Buka Lirik** |
 | Dynamic island media | Arahkan pointer ke tengah tepi atas layar 1 detik (saat ada media berputar) |
 | Ganti pemutar di island | Klik chip nama pemutar |
 | Geser posisi lagu | Klik atau tarik progress bar di island |
@@ -437,6 +476,22 @@ powertools config set clipboard.max_items 500
 
 `powertools` tanpa path hanya tersedia kalau `~/.local/share/powertools/bin`
 ada di `PATH`. Installer selalu menulis path lengkap di entri menu dan ekstensi.
+
+### Ikon panel (tray)
+
+Ekstensi menaruh ikon PowerTools di panel (area status kanan), terpisah dari
+ikon taskbar. Klik ikonnya untuk menu cepat:
+
+- **Buka Lirik**, **Riwayat Clipboard**, **Launcher**, **Ambil Warna** —
+  sama dengan hotkey masing-masing.
+- **Pengaturan** — membuka jendela pengaturan tanpa perlu terminal.
+- **Keluar PowerTools** — menghentikan proses background.
+
+Ikon ini tetap ada walau jendela lirik disembunyikan dari taskbar
+(`lyrics.hide_from_taskbar`), jadi tetap ada jalan masuk saat taskbar bersih.
+Kalau ikon tidak muncul setelah memperbarui PowerTools, jalankan
+`powertools bridge` lalu logout/login sekali — kode ekstensi baru hanya
+dimuat saat shell mulai.
 
 ### Mengubah shortcut
 
@@ -499,8 +554,16 @@ ulang `config.json` sendiri, jadi hasilnya sama dengan mengubahnya di GUI.
 Selain saklar modul, GUI juga mengatur: auto-paste, penyimpanan gambar, kuota
 dan masa kedaluwarsa riwayat, jumlah hasil launcher, URL pencarian, format
 warna, jeda hover & lama popup island, opsi lirik (tampil otomatis, pin,
-offset waktu, ukuran teks), **Discord Application ID + Application ID per
-sumber + asset cadangan cover + status koneksi**, dan opsi `resident`.
+sembunyikan dari taskbar, offset waktu, ukuran teks, kepekatan latar),
+**pemetaan sumber → judul
+Listening to (dropdown aplikasi aktif + preset Application ID) + asset
+cadangan cover + status koneksi**, dan opsi
+`resident`.
+
+Jendela pengaturan memakai **tab vertikal di sisi kiri**: satu tab `Umum`
+(opsi aplikasi dan info versi/berkas) dan satu tab per modul. Tab modul yang
+dimatikan ditandai titik abu-abu di navigasi dan menampilkan pemberitahuan di
+atas opsinya, jadi status tiap fitur terlihat tanpa membuka satu per satu.
 
 Tombol **Buka config.json** tetap tersedia untuk opsi lanjutan yang belum ada
 di GUI (mis. `clipboard.max_chars`). Mengubah berkas itu dari luar juga
@@ -545,8 +608,11 @@ Berkas: `~/.config/powertools/config.json` (dibuat otomatis saat pertama jalan).
   "lyrics": {
     "auto_show": false,
     "pinned": false,
+    "romanize": false,
     "offset_ms": 0,
-    "font_size": 15
+    "font_size": 15,
+    "opacity": 94,
+    "hide_from_taskbar": true
   },
   "discord": {
     "app_id": "",
@@ -579,9 +645,11 @@ Berkas: `~/.config/powertools/config.json` (dibuat otomatis saat pertama jalan).
 | `lyrics.romanize` | `true`: lirik Korea/Jepang tampil dalam huruf Latin (romaji) sejak awal. Bisa diubah dari tombol `Romaji` di jendela. |
 | `lyrics.offset_ms` | Geser seluruh timestamp dalam milidetik. Nilai positif membuat lirik tampil lebih cepat. |
 | `lyrics.font_size` | Ukuran teks lirik dalam poin (9–28). |
-| `discord.app_id` | Application ID dari Discord Developer Portal. Nama aplikasi di portal itulah yang tampil sebagai "Listening to ...". Boleh kosong kalau ID bawaan dipakai. |
-| `discord.app_ids` | Objek pemetaan sumber → Application ID, mis. `{"spotify": "123…"}`. Dipakai agar judulnya bisa "Listening to Spotify". Kunci `default` untuk sumber yang tidak dipetakan. |
-| `discord.use_builtin_ids` | `true`: pakai Application ID bawaan PowerTools (`youtube-music` dan `default`) untuk sumber yang tidak dipetakan. Default `true`. |
+| `lyrics.opacity` | Kepekatan latar kartu lirik dalam persen (30–100, default 94). Hanya latar yang dibuat tembus pandang; teks tetap pekat. |
+| `lyrics.hide_from_taskbar` | `true` (default): jendela lirik disembunyikan dari taskbar dan Alt-Tab lewat ekstensi GNOME. Ikon PowerTools di panel tetap bisa membukanya. `false`: jendela tampil di taskbar seperti jendela biasa. |
+| `discord.app_id` | Application ID lama (opsional). Tetap dihormati sebagai cadangan untuk config lama; GUI menampilkannya sebagai baris **Application ID lama** dan bisa dihapus dari sana. Boleh kosong. |
+| `discord.app_ids` | Objek pemetaan sumber → Application ID preset, mis. `{"spotify": "1573948090166288504"}`. Diisi dari dropdown Pengaturan; GUI hanya menawarkan ID preset, bukan teks bebas. Kunci `default` menjadi cadangan untuk sumber lain. |
+| `discord.use_builtin_ids` | `true`: sumber tanpa pemetaan memakai preset `default`. `false`: sumber tanpa pemetaan tidak dikirim ke Discord. Diatur lewat dropdown baris **Sumber lain** di Pengaturan. Default `true`. |
 | `discord.fallback_asset` | Nama asset Rich Presence (Developer Portal → Art Assets) yang dipakai saat cover hanya berupa file lokal, supaya tidak muncul tanda "?". |
 | `discord.show_paused` | `true`: status tetap tampil saat lagu dijeda (tanpa progress bar). Default `false`. |
 | `discord.show_album_art` | `true`: kirim cover album `http(s)` sebagai gambar besar. Cover `file://` dan `data:` diganti `fallback_asset` (atau dilewati kalau kosong). Default `true`. |
@@ -599,8 +667,10 @@ powertools config set modules.media false              # matikan island
 powertools config set modules.lyrics false             # matikan lirik
 powertools config set lyrics.pinned true               # sematkan jendela lirik
 powertools config set lyrics.auto_show true            # muncul saat lagu diputar
+powertools config set lyrics.opacity 60               # latar lirik lebih tembus
 powertools config set modules.discord true             # aktifkan Listening to
-powertools config set discord.use_builtin_ids false    # pakai ID sendiri saja
+powertools config set discord.app_ids.brave 1573959687760646274  # preset YT Music
+powertools config set discord.use_builtin_ids false    # hanya ID sendiri
 powertools config set discord.app_id 123456789012345678
 powertools config set discord.app_ids.spotify 123456789012345678
 powertools config set discord.fallback_asset music     # cover file lokal
@@ -638,6 +708,7 @@ itu PowerTools memakai dua bagian kecil:
 │ • fokuskan window aplikasi   │        │ render popup / launcher       │
 │ • D-Bus kecil (opsional)     │        │ color picker                  │
 │ • dynamic island media       │        │                               │
+│ • ikon tray di panel         │        │                               │
 └──────────────────────────────┘        └───────────────────────────────┘
 ```
 
@@ -653,6 +724,12 @@ itu PowerTools memakai dua bagian kecil:
   dilepas `unmake_above()`. Di Wayland hanya shell yang boleh mengubah lapisan
   jendela. Lirik diambil dari LRCLIB di thread pekerja, jadi UI tidak pernah
   tersendat menunggu jaringan.
+- Ikon PowerTools di panel adalah pintu masuk cepat (lirik, clipboard,
+  launcher, warna, pengaturan) sekaligus pengganti ikon taskbar untuk jendela
+  lirik yang disembunyikan. Di Wayland properti `skip-taskbar` milik Mutter
+  hanya bisa dibaca, jadi ekstensi menandai jendela lirik di sisi JavaScript;
+  taskbar, Alt-Tab, dan overview menyaringnya tanpa mengubah perilaku inti
+  Mutter.
 - Setiap modul punya saklar sendiri. Yang dimatikan tidak menyisakan pekerjaan
   latar: tanpa pemantau selection, tanpa pemindaian `.desktop`, tanpa timer
   media, tanpa hotkey.
@@ -712,13 +789,14 @@ shortcut, **status autostart (systemd/GNOME/D-Bus)**, jumlah item riwayat, porta
 dan tool screenshot.
 
 Untuk Discord, `doctor` juga menampilkan **sumber lagu yang sedang aktif**
-(`spotify`, `brave`, `youtube-music`, …), apakah sumber itu sudah dipetakan ke
-Application ID, dan apakah covernya bisa diambil Discord:
+(`spotify`, `brave`, `youtube-music`, …), preset yang dipakai untuk sumber itu,
+dan apakah covernya bisa diambil Discord:
 
 ```
 Discord          : aktif (socket ditemukan)
-Discord sumber   : spotify
-Sumber terdeteksi: brave — "Stand by Me" (dipetakan: tidak (pakai ID utama))
+Discord sumber   : Brave=YouTube Music
+Discord preset   : PowerTools (umum)=1573948090166288504, YouTube Music=1573959687760646274
+Sumber terdeteksi: Brave (brave) "Stand by Me" — pilihan di Pengaturan — YouTube Music, app 1573959687760646274
 Cover            : file lokal (tidak bisa diambil Discord) — unggah Art Asset lalu set discord.fallback_asset
 ```
 
@@ -762,9 +840,11 @@ mati dan `gnome-extensions info` menampilkan `State: INITIALIZED` dengan
 | `Alt+Space` membuka menu jendela | Installer tidak sempat melepasnya: `gsettings set org.gnome.desktop.wm.keybindings activate-window-menu "[]"`. |
 | Island media tidak pernah muncul | Pastikan aplikasinya mengekspos MPRIS (`gdbus call --session --dest org.freedesktop.DBus --object-path /org/freedesktop/DBus --method org.freedesktop.DBus.ListNames \| grep mpris`), media sedang berputar, dan `media-island-enabled` bernilai `true`. Setelah memperbarui PowerTools, jalankan `./install.sh` lalu logout/login sekali agar kode ekstensi baru dimuat. |
 | Island muncul tetapi tanpa cover | Cover `http(s)` butuh jaringan; cover `data:` dan `file://` tetap offline. Cek log `journalctl --user -b \| grep -i powertools`. |
+| Jendela lirik masih muncul di taskbar | `lyrics.hide_from_taskbar` harus `true` dan ekstensi berstatus `ACTIVE` (`powertools doctor`). Setelah memperbarui PowerTools, jalankan `./install.sh` lalu logout/login sekali — kode ekstensi lama belum punya penanda taskbar. |
+| Ikon PowerTools tidak ada di panel | Ekstensi belum aktif atau shell belum memuat versi baru. Jalankan `powertools bridge`, lalu logout/login sekali. |
 | Fitur baru tidak muncul di GUI / hotkey | Yang dijalankan adalah salinan terpasang di `~/.local/share/powertools/app`, bukan folder repo. Jalankan `./install.sh` lagi, tutup-buka jendela Pengaturan, lalu logout/login sekali untuk ekstensi GNOME. |
-| Status Discord tidak muncul | Pastikan modul **Discord Listening** aktif dan aplikasi Discord desktop sedang berjalan, `resident` bernilai `true`, serta `powertools doctor` menunjukkan Application ID yang dipakai (bawaan atau milik Anda). Cek socket dengan `ls "$XDG_RUNTIME_DIR"/discord-ipc-*` (Flatpak: `"$XDG_RUNTIME_DIR"/app/com.discordapp.Discord/`). |
-| Judulnya "Listening to PowerTools", bukan nama pemutar | Discord memakai **nama aplikasi** di Developer Portal. YouTube Music sudah punya nama sendiri lewat ID bawaan; untuk layanan lain buat aplikasi Discord terpisah lalu isi `discord.app_ids.<sumber>`. Lihat [judul Listening to](#judul-listening-to--mengikuti-nama-aplikasi). |
+| Status Discord tidak muncul | Pastikan modul **Discord Listening** aktif dan aplikasi Discord desktop sedang berjalan, `resident` bernilai `true`, serta `powertools doctor` menunjukkan preset Application ID yang dipakai. Cek socket dengan `ls "$XDG_RUNTIME_DIR"/discord-ipc-*` (Flatpak: `"$XDG_RUNTIME_DIR"/app/com.discordapp.Discord/`). |
+| Judulnya "Listening to PowerTools", bukan nama pemutar | Discord memakai **nama aplikasi** preset, bukan nama pemutar. YouTube Music punya preset sendiri; untuk sumber lain pilih baris sumbernya di **Pengaturan → Discord Listening** lalu ganti dropdown presetnya. Lihat [judul Listening to](#judul-listening-to--mengikuti-nama-aplikasi). |
 | Gambar album tampil "?" | Cover dari browser berupa file lokal `file:///tmp/...`, atau aplikasi Discord belum punya ikon. Unggah **App Icon** di General Information, dan/atau asset di **Rich Presence → Art Assets** lalu `powertools config set discord.fallback_asset <nama asset>`. Cek sumber dengan `powertools doctor`. |
 | Progress bar tidak bisa digeser | Pemutar tidak mengirim `CanSeek` atau panjang lagu. Ini batasan pemutarnya, bukan PowerTools. |
 | Picker muncul tapi tanpa loupe | GNOME Shell tidak punya `PickColor`; PowerTools otomatis memakai portal atau overlay sendiri. |
@@ -806,11 +886,11 @@ Hapus berkas itu (dan logout/login) setelah selesai.
   `~/.local/share/powertools`).
 - Dynamic island hanya mengenali pemutar yang mengekspos **MPRIS**. Aplikasi
   yang tidak punya antarmuka MPRIS tidak akan muncul.
-- Discord Listening membutuhkan **Application ID** dari Discord Developer
-  Portal (gratis) dan aplikasi Discord desktop yang sedang berjalan. Nama yang
-  tampil sebagai "Listening to ..." adalah nama aplikasi di portal tersebut,
-  bukan nama pemutar musiknya. Fitur ini juga butuh `resident: true` supaya
-  proses tetap hidup dan status terus diperbarui.
+- Discord Listening sudah membawa **preset Application ID** sendiri, jadi tidak
+  perlu membuat aplikasi Discord. Aplikasi Discord desktop harus sedang
+  berjalan. Nama yang tampil sebagai "Listening to ..." adalah nama aplikasi
+  preset tersebut, bukan nama pemutar musiknya. Fitur ini juga butuh
+  `resident: true` supaya proses tetap hidup dan status terus diperbarui.
 - Browser biasanya hanya mengekspos **satu sesi media aktif** per proses, jadi
   dua tab YouTube yang berputar bersamaan bisa tampil sebagai satu pemutar
   (Chromium/Firefox), bukan dua.
@@ -824,6 +904,14 @@ Hapus berkas itu (dan logout/login) setelah selesai.
   sana (atau lagu daerah/rilis sangat baru) akan menampilkan "lirik tidak
   ditemukan"; hasil negatif di-cache 6 jam agar tidak menembak API terus.
 - Lirik hanya sinkron kalau LRCLIB punya versi ber-timestamp untuk lagu itu.
+- Klik dua kali pada baris lirik hanya bisa melompat kalau pemutar mengirim
+  `CanSeek: true` dan menerima `SetPosition`/`Seek`. Pemutar yang hanya
+  menyediakan status baca (mis. sebagian stream radio) akan menampilkan pesan
+  "tidak mendukung lompat waktu" di baris status.
+- Menyembunyikan jendela lirik dari taskbar dan menaruh ikon di panel
+  sepenuhnya dikerjakan ekstensi GNOME (Wayland tidak mengizinkan aplikasi
+  mengubah `skip-taskbar`). Tanpa ekstensi aktif, jendela lirik tampil seperti
+  jendela biasa dan ikon panel tidak ada.
   Kalau tidak, teks tetap tampil tetapi tanpa sorotan/auto-scroll.
 - Romaji bergantung pada unggahan LRCLIB (tidak konsisten) atau transliterasi
   Hangul lokal. Lagu Jepang berkanji tanpa unggahan romaji tetap tampil dalam
@@ -867,9 +955,10 @@ powertools/               aplikasi GTK4
   colorspace.py           konversi hex/rgb/hsl/cmyk, shade, palet
   ui_color.py             jendela mengambang hasil color picker
   ui_lyrics.py            jendela lirik mengambang + auto-scroll
+  ui_settings.py          jendela pengaturan (tab vertikal per modul)
   lyrics.py               klien LRCLIB, parser LRC, cache, transliterasi Hangul
   discord.py              klien IPC Discord Rich Presence (Listening to)
-  sources.py              penamaan sumber MPRIS + pemilihan Application ID
+  sources.py              penamaan sumber MPRIS + preset Application ID
   mpris.py                pemantau MPRIS untuk lagu & posisi
   store.py                riwayat append-only, pin, hapus, kompresi, kuota gambar
   matcher.py              fuzzy match, kalkulator aman, persen
@@ -886,7 +975,7 @@ gnome-extension/powertools@local/   jembatan GNOME Shell
   schemas/                          pengaturan ekstensi
 tests/test_core.py                  tes unit inti
 tests/test_discord.py               tes IPC/activity Discord (tanpa Discord)
-tests/test_sources.py               tes penamaan sumber MPRIS
+tests/test_sources.py               tes penamaan sumber + preset Application ID
 assets/                             ikon aplikasi (swiss-knife SVG + PNG 512)
 docs/                               tangkapan layar
 ```
