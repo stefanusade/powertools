@@ -337,6 +337,13 @@ ulang. Kalau berbeda (unggahan romaji kadang punya baris ekstra), tampilan
 dibangun ulang tetapi posisi gulir dikembalikan, dan gulir manual yang sedang
 aktif tidak dibatalkan.
 
+![Tombol Romaji ditekan: lirik NMIXX "Crescendo" berganti dari huruf Latin ke Hangul, lalu kembali lagi](docs/gifs/lyrics-romaji.gif)
+
+NMIXX — "Crescendo" di atas adalah contoh jalur transliterasi: lagunya murni
+Hangul dan tidak ada unggahan romaji di LRCLIB, jadi versi Latinnya dibuat
+PowerTools sendiri. Bagian berbahasa Inggris dibiarkan apa adanya; hanya
+Hangul yang diubah.
+
 Cache lirik versi lama (dibuat sebelum fitur romaji ada) tidak punya data
 romaji; entri seperti itu otomatis diambil ulang sekali, jadi tidak perlu
 menghapus `~/.cache/powertools/lyrics` secara manual.

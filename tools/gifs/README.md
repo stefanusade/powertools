@@ -21,6 +21,13 @@ Konfigurasi, riwayat clipboard, dan cache ditulis ke direktori sementara
 (`setup_env`), jadi data pengguna tidak tersentuh dan tiap rekaman mulai dari
 keadaan bersih.
 
+`gif_lyrics_romaji.py` tidak memanggil LRCLIB: lirik "Crescendo" (NMIXX)
+disalin apa adanya dari rekaman LRCLIB id 33813966, lalu versi Latinnya dibuat
+`lyrics._attach_romaji` dengan daftar hasil pencarian kosong. Jadi rekaman
+tetap jalan tanpa internet, dan yang terlihat sama dengan hasil sungguhan —
+termasuk jalur transliterasi Hangul lokal, karena lagu ini tidak punya
+unggahan romaji.
+
 ## Dynamic island: rekam area layar
 
 Island hidup di dalam GNOME Shell (`media.js`, St/Clutter), bukan jendela GTK,
@@ -69,6 +76,7 @@ berisi isi desktop orang.
 | `gif_color_result.py` | `color-picker.gif` — ganti warna, salin HSL/CMYK |
 | `gif_color_overlay.py` | `color-picker-overlay.gif` — loupe fallback + klik |
 | `gif_lyrics.py` | `lyrics.gif` — gulir otomatis, hover, klik dua kali |
+| `gif_lyrics_romaji.py` | `lyrics-romaji.gif` — tombol Romaji: Latin ↔ Hangul |
 | `gif_settings.py` | `settings.gif` — pindah tab, ubah kepekatan, pin |
 | `gif_discord.py` | `discord.gif` — pilih preset per sumber |
 | `gif_island.py` | `island.gif` — muncul, ganti pemutar, tutup, hover |
