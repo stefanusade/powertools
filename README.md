@@ -112,6 +112,8 @@ Album art dari `file://`, `data:`, atau `http(s)://` didukung. Art jaringan
 di-cache di `~/.cache/powertools/media-art` (dibersihkan otomatis setelah 30
 hari), jadi lagu yang sama tidak mengunduh ulang.
 
+![Island muncul saat media berubah, chip pemilih pemutar, klik untuk ganti pemutar, lalu muncul lagi saat pointer berhenti di tepi atas](docs/gifs/island.gif)
+
 ### Listening to Discord (opsional)
 
 Status **Listening to** di profil Discord menampilkan lagu yang sedang diputar:
