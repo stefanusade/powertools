@@ -15,9 +15,9 @@ Windows:
 Dibuat untuk **Zorin OS 18.1 / GNOME 46 / Wayland**, tapi juga jalan di distro
 GNOME lain (Ubuntu, Fedora, Arch) dan punya fallback untuk sesi X11.
 
-![Riwayat clipboard (tema gelap)](docs/clipboard-dark.png)
+![Riwayat clipboard: cari, pilih, lalu pin item](docs/gifs/clipboard.gif)
 
-![Launcher (tema gelap)](docs/launcher-dark.png)
+![Launcher: hitung ekspresi, lalu cari aplikasi](docs/gifs/launcher.gif)
 
 ---
 
@@ -63,7 +63,9 @@ GNOME lain (Ubuntu, Fedora, Arch) dan punya fallback untuk sesi X11.
 3. Kalau portal juga tidak ada: overlay screenshot sendiri dengan crosshair,
    magnifier 8×, dan kartu `#RRGGBB` + `rgb()`.
 
-![Jendela hasil color picker](docs/color-result.png)
+![Overlay fallback: loupe mengikuti kursor, klik memilih warna](docs/gifs/color-picker-overlay.gif)
+
+![Jendela hasil color picker: hex, RGB, HSL, CMYK, dan palet](docs/gifs/color-picker.gif)
 
 Setelah warna diambil, **jendela hasil mengambang** muncul di atas dengan:
 - **Hex, RGB, HSL, dan CMYK** dalam sintaks CSS, masing-masing punya tombol
@@ -139,6 +141,8 @@ PowerTools; yang diatur hanya **sumber mana yang memakai judul mana**.
 5. Baris **Sumber lain** menentukan cadangan untuk sumber yang tidak dipilih
    sendiri: **Otomatis (bawaan)** memakai preset default, **Tidak dikirim**
    menyembunyikan status untuk sumber tersebut, atau pilih preset tertentu.
+
+![Mengganti preset per sumber lewat dropdown, tanpa mengetik Application ID](docs/gifs/discord.gif)
 
 Pilihan disimpan sebagai `discord.app_ids` (sumber → Application ID preset) di
 `config.json`, jadi tetap berlaku setelah PowerTools atau sesi desktop dimulai
@@ -263,6 +267,8 @@ Ikon itu yang dipakai Discord saat activity tidak membawa gambar.
 Jendela lirik kecil yang mengambang di kanan bawah layar dan **menggulir
 sendiri mengikuti posisi lagu**. Sumber liriknya [LRCLIB](https://lrclib.net) —
 gratis, tanpa API key, dan menyediakan lirik sinkron (LRC) untuk ribuan lagu.
+
+![Lirik mengambang: gulir otomatis, sorotan baris, klik dua kali untuk lompat](docs/gifs/lyrics.gif)
 
 - Lagu dibaca dari **MPRIS**, jadi berlaku untuk Spotify, VLC, mpv, Firefox,
   Chromium (YouTube/YouTube Music), dan pemutar lain — sama seperti island.
@@ -564,6 +570,8 @@ Jendela pengaturan memakai **tab vertikal di sisi kiri**: satu tab `Umum`
 (opsi aplikasi dan info versi/berkas) dan satu tab per modul. Tab modul yang
 dimatikan ditandai titik abu-abu di navigasi dan menampilkan pemberitahuan di
 atas opsinya, jadi status tiap fitur terlihat tanpa membuka satu per satu.
+
+![Berpindah tab per modul dan mengubah opsi langsung berlaku](docs/gifs/settings.gif)
 
 Tombol **Buka config.json** tetap tersedia untuk opsi lanjutan yang belum ada
 di GUI (mis. `clipboard.max_chars`). Mengubah berkas itu dari luar juga
@@ -941,6 +949,7 @@ Logout/login sekali setelah mencopot.
 ```bash
 python3 -m unittest discover -s tests -v      # semua tes (GTK dilewati kalau tidak ada)
 python3 -m py_compile powertools/*.py
+./tools/gifs/render-all.sh                    # rekam ulang GIF di docs/gifs
 ```
 
 Struktur:
@@ -978,6 +987,8 @@ tests/test_discord.py               tes IPC/activity Discord (tanpa Discord)
 tests/test_sources.py               tes penamaan sumber + preset Application ID
 assets/                             ikon aplikasi (swiss-knife SVG + PNG 512)
 docs/                               tangkapan layar
+docs/gifs/                          animasi fitur (GIF) untuk README
+tools/gifs/                         perekam GIF di atas (lihat README-nya)
 ```
 
 Lisensi: MIT (lihat `LICENSE`).
