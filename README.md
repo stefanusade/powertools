@@ -321,9 +321,14 @@ pemutar. Clipboard, launcher, dan color picker tetap 100% offline.
 ## Instalasi
 
 ```bash
-cd ~/Public/powertools
+git clone https://github.com/stefanusade/powertools.git
+cd powertools
 ./install.sh
 ```
+
+Installer berjalan **tanpa `sudo`** — semua dipasang di `~/.local/share` dan
+`~/.config`. Kalau ada dependensi yang belum ada, installer berhenti dan
+menampilkan perintah `apt install` yang perlu Anda jalankan sendiri.
 
 Yang dilakukan installer:
 
@@ -356,7 +361,8 @@ Perintah `powertools` dan layanan background selalu menjalankan salinan di
 atau mengubah kode, jalankan installer lagi:
 
 ```bash
-cd ~/Public/powertools && ./install.sh
+git pull
+./install.sh
 ```
 
 Installer menyalin ulang program dan me-restart layanan, sehingga fitur baru
