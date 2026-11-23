@@ -1,0 +1,6 @@
+# Tombol "Sponsor" di halaman repo GitHub.
+#
+# PowerTools tidak memakai GitHub Sponsors, jadi tautannya diisi lewat
+# `custom`. Sociabuzz dipakai karena mendukung pembayaran lokal Indonesia
+# (QRIS, e-wallet, transfer bank) tanpa perlu akun Stripe/PayPal.
+custom: ["https://sociabuzz.com/coveedboy/tribe"]

@@ -1,5 +1,7 @@
 # PowerTools untuk Linux
 
+<a href="https://sociabuzz.com/coveedboy/tribe"><img src="docs/donate.png" alt="Dukung PowerTools lewat Sociabuzz — donasi sukarela" width="300"></a>
+
 Pengganti ringan untuk tiga fitur Windows 11 / PowerToys yang paling sering
 dirindukan saat pindah ke Linux, plus **lirik mengambang** yang belum ada di
 Windows:
@@ -995,12 +997,30 @@ tests/test_core.py                  tes unit inti
 tests/test_discord.py               tes IPC/activity Discord (tanpa Discord)
 tests/test_sources.py               tes penamaan sumber + preset Application ID
 assets/                             ikon aplikasi (swiss-knife SVG + PNG 512)
-docs/                               tangkapan layar
+docs/                               tangkapan layar + tombol donasi
+  donate.svg                        sumber tombol (SVG, 300x64)
+  donate.png                        hasil render 2x untuk README
 docs/gifs/                          animasi fitur (GIF) untuk README
 tools/gifs/                         perekam GIF di atas (lihat README-nya)
 ```
 
 Lisensi: MIT (lihat `LICENSE`).
+
+## Dukung proyek ini
+
+PowerTools gratis, tanpa iklan, tanpa akun, dan tanpa telemetri — semuanya
+jalan di komputer Anda sendiri. Kalau proyek ini berguna, Anda bisa memberi
+donasi sukarela lewat Sociabuzz. Tidak wajib sama sekali: semua fitur tetap
+lengkap tanpa membayar apa pun.
+
+<a href="https://sociabuzz.com/coveedboy/tribe"><img src="docs/donate.png" alt="Dukung PowerTools lewat Sociabuzz — donasi sukarela" width="300"></a>
+
+Cara lain yang sama berharganya dan gratis:
+
+- Laporkan bug atau usulkan fitur lewat
+  [Issues](https://github.com/stefanusade/powertools/issues).
+- Beri bintang di repo supaya orang lain menemukannya.
+- Bagikan ke komunitas Linux/Zorin/Ubuntu di sekitar Anda.
 
 ## Dokumen legal (untuk Discord Application)
 
