@@ -17,6 +17,10 @@ Windows:
 Dibuat untuk **Zorin OS 18.1 / GNOME 46 / Wayland**, tapi juga jalan di distro
 GNOME lain (Ubuntu, Fedora, Arch) dan punya fallback untuk sesi X11.
 
+> **Catatan:** proyek ini dikembangkan dengan bantuan AI. Rinciannya, termasuk
+> hal yang perlu Anda periksa sendiri, ada di
+> [Dikembangkan dengan bantuan AI](#dikembangkan-dengan-bantuan-ai).
+
 ![Riwayat clipboard: cari, pilih, lalu pin item](docs/gifs/clipboard.gif)
 
 ![Launcher: hitung ekspresi, lalu cari aplikasi](docs/gifs/launcher.gif)
@@ -1005,6 +1009,28 @@ tools/gifs/                         perekam GIF di atas (lihat README-nya)
 ```
 
 Lisensi: MIT (lihat `LICENSE`).
+
+### Dikembangkan dengan bantuan AI
+
+PowerTools ditulis dengan bantuan asisten AI (model bahasa) — kode, tes,
+dokumentasi, dan skrip perekam GIF di `tools/gifs/`. Manusia yang menentukan
+fitur, meninjau hasilnya, menjalankan aplikasinya di sesi GNOME sungguhan, dan
+memutuskan apa yang layak dirilis.
+
+Yang perlu Anda tahu sebagai pengguna:
+
+- **Tetap periksa sebelum dipakai di lingkungan sensitif.** Kode hasil AI bisa
+  punya celah yang tidak terlihat dari tes otomatis, terutama di bagian yang
+  menyentuh berkas pengguna, D-Bus, dan clipboard.
+- **Kualitasnya tidak merata.** Beberapa bagian punya tes otomatis yang rapat
+  (`tests/`), sebagian lain hanya diuji manual di sesi nyata. Bagian yang
+  jarang dipakai lebih mungkin punya bug yang belum ketahuan.
+- **Laporan bug sangat membantu.** Kalau ada yang aneh, tulis langkah
+  reproduksinya di [Issues](https://github.com/stefanusade/powertools/issues) —
+  itu cara tercepat membuat perilakunya benar.
+
+Tidak ada telemetri dan tidak ada API AI yang dipanggil saat aplikasi berjalan:
+bantuan AI hanya dipakai saat menulis kode, bukan saat PowerTools dipakai.
 
 ## Dukung proyek ini
 
