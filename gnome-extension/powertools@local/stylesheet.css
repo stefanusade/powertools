@@ -85,31 +85,45 @@
     background-color: #dcdce2;
 }
 
-.pt-media-chips {
-    margin-top: 6px;
+.pt-media-tabs {
+    margin: 0 0 8px 0;
 }
 
-.pt-media-chip {
-    padding: 3px 8px;
-    border: none;
+.pt-media-tab {
+    padding: 3px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.10);
     border-radius: 99px;
-    background-color: rgba(255, 255, 255, 0.10);
+    background-color: rgba(255, 255, 255, 0.06);
     color: rgba(255, 255, 255, 0.72);
 }
 
-.pt-media-chip:hover {
-    background-color: rgba(255, 255, 255, 0.18);
+.pt-media-tab:hover {
+    background-color: rgba(255, 255, 255, 0.14);
 }
 
-.pt-media-chip-active {
+/* Tab jendela: MPRIS tidak memberi kontrol untuk sesi ini, jadi bentuknya
+ * dibedakan (garis putus-putus) supaya tidak disangka bisa dikendalikan. */
+.pt-media-tab-window {
+    border-style: dashed;
+}
+
+.pt-media-tab-active {
     background-color: #f1f1f5;
+    border-color: #f1f1f5;
     color: #121214;
 }
 
-.pt-media-chip-active:hover {
+.pt-media-tab-active:hover {
     background-color: #ffffff;
 }
 
-.pt-media-chip-label {
+.pt-media-tab-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 99px;
+    background-color: #4ade80;
+}
+
+.pt-media-tab-label {
     font-size: 10px;
 }

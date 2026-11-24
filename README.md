@@ -94,8 +94,25 @@ yang mendukung MPRIS** — Spotify, VLC, mpv, Firefox/Chromium (YouTube, YouTube
 Music), dan aplikasi lain. Tidak perlu plugin per aplikasi.
 
 Isinya: cover album, judul + artis, tombol **⏮ ⏯ ⏭**, progress bar yang bisa
-diklik/digeser, dan **chip pemilih pemutar** kalau ada lebih dari satu sumber
-(tiap pemutar bisa dipilih sendiri).
+diklik/digeser, dan **baris tab** kalau ada lebih dari satu sumber.
+
+Tab muncul untuk **setiap pemutar MPRIS** dan **setiap jendela peramban** yang
+sedang membuka media, jadi YouTube dan YouTube Music bisa tampil berdampingan
+tanpa saling menimpa. Ketentuannya:
+
+- Tab pemutar: ada titik hijau selama pemutar itu berbunyi, plus kontrol penuh
+  (progress, seek, tombol putar).
+- Tab jendela: bergaris putus-putus. Tab ini hanya menunjukkan judul jendela
+  dan keterangan "tanpa kontrol", karena MPRIS tidak melaporkan sesi per tab —
+  satu peramban hanya mendaftarkan **satu** pemutar walau beberapa tabnya
+  berbunyi. Jendela yang tampil dibatasi 4 dan disaring: hanya jendela milik
+  proses pemutar yang sedang aktif.
+- **Pilihan menempel**: tab yang diklik tetap terpilih walau tab lain mulai
+  berbunyi. Island baru berpindah sendiri kalau tab yang dipilih hilang.
+
+Peramban hanya menyediakan satu pemutar MPRIS per proses, jadi dua tab YouTube
+di jendela Brave yang sama tetap tidak bisa dipisah; yang bisa dipisah adalah
+antar jendela dan antar aplikasi web (PWA).
 
 Kemunculannya:
 
@@ -118,7 +135,7 @@ Album art dari `file://`, `data:`, atau `http(s)://` didukung. Art jaringan
 di-cache di `~/.cache/powertools/media-art` (dibersihkan otomatis setelah 30
 hari), jadi lagu yang sama tidak mengunduh ulang.
 
-![Island muncul saat media berubah, chip pemilih pemutar, klik untuk ganti pemutar, lalu muncul lagi saat pointer berhenti di tepi atas](docs/gifs/island.gif)
+![Island muncul saat media berubah, tab bertambah ketika pemutar kedua berbunyi, klik tab untuk kembali ke pemutar pertama](docs/gifs/island.gif)
 
 ### Listening to / Watching Discord (opsional)
 
@@ -285,6 +302,11 @@ itu yang aktif), judulnya tidak bisa dicocokkan; PowerTools lalu memakai PWA
 yang ada — atau nama browser kalau tidak ada PWA. Discord juga hanya bisa
 menampilkan **satu** activity, yaitu sesi media terakhir yang berubah. Spotify
 desktop, VLC, dan mpv selalu terdeteksi tepat.
+
+Dynamic island tidak ikut dibatasi satu sesi itu: ia menampilkan satu tab untuk
+setiap pemutar MPRIS **dan** setiap jendela peramban yang membuka media, jadi
+jendela YouTube dan jendela YouTube Music bisa terlihat bersamaan — lengkap
+dengan kontrol penuh hanya pada tab pemutar.
 
 #### Cover album
 
@@ -524,7 +546,7 @@ Cek status keempat lapisan kapan saja:
 | Lompat ke bagian lirik | Klik dua kali pada baris lirik |
 | Buka lirik dari panel | Klik ikon PowerTools di panel → **Buka Lirik** |
 | Dynamic island media | Arahkan pointer ke tengah tepi atas layar 1 detik (saat ada media berputar) |
-| Ganti pemutar di island | Klik chip nama pemutar |
+| Ganti pemutar di island | Klik tab nama pemutar/jendela |
 | Geser posisi lagu | Klik atau tarik progress bar di island |
 | Pilih item | `↑` / `↓` lalu `Enter` |
 | Pin / lepas pin | `Ctrl+P` |
@@ -792,6 +814,9 @@ itu PowerTools memakai dua bagian kecil:
   tidak ada polling dan tidak ada UI clipboard. Beban CPU praktis 0%.
 - Dynamic island juga hidup di dalam shell: ia mendengarkan sinyal MPRIS
   (`org.mpris.MediaPlayer2`) lewat D-Bus dan hanya menggambar saat diperlukan.
+  Daftar jendela peramban diambil dari jembatan shell setiap 2 detik **hanya
+  selama island tampil**; penyusunan tabnya ada di `tabs.js` yang murni (tanpa
+  `gi://`), sehingga bisa diuji dengan `gjs -m` di luar shell.
   Deteksi hover memakai timer ringan 5×/detik (hanya membaca posisi pointer),
   bukan event motion yang mudah tertelan panel. Mematikan modul **media**
   menghapus timer dan koneksi MPRIS itu sepenuhnya.
@@ -929,6 +954,7 @@ mati dan `gnome-extensions info` menampilkan `State: INITIALIZED` dengan
 | Status/tampilan Discord tidak sesuai | Pastikan modul **Discord Listening** aktif dan aplikasi Discord desktop sedang berjalan, `resident` bernilai `true`, serta `powertools doctor` menunjukkan preset Application ID yang dipakai. Cek socket dengan `ls "$XDG_RUNTIME_DIR"/discord-ipc-*` (Flatpak: `"$XDG_RUNTIME_DIR"/app/com.discordapp.Discord/`). |
 | Sumber di Pengaturan tidak cocok dengan aplikasi yang terbuka | Daftar diambil dari pemutar MPRIS yang benar-benar terbuka; tekan **Muat ulang daftar aplikasi**. Pemutar tanpa sesi media (belum memutar apa pun) belum punya nama MPRIS, jadi belum muncul. |
 | Aplikasi web (PWA) tidak terdeteksi terpisah dari browsernya | Pembedaan PWA memakai daftar jendela dari ekstensi GNOME, dan kode ekstensi hanya dimuat saat login. Jalankan `./install.sh`, lalu **logout dan login lagi**; Pengaturan menampilkan peringatan selama metode itu belum tersedia. |
+| YouTube dan YouTube Music bersamaan | MPRIS hanya satu pemutar per proses browser, jadi keduanya tampil sebagai **satu** tab pemutar. Yang bisa dipisah adalah jendelanya: buka YouTube Music sebagai aplikasi web (PWA) atau di jendela Brave lain, lalu tab jendela itu muncul berdampingan dengan tab pemutar. Lihat [sumber di browser](#sumber-di-browser-dan-aplikasi-web-pwa). |
 | Dua tab browser memakai judul yang sama | MPRIS hanya satu pemutar per proses browser. Pasang layanan sebagai PWA (mis. YouTube Music) agar punya sumber sendiri, atau petakan baris browser ke preset yang paling sering dipakai. Lihat [sumber di browser](#sumber-di-browser-dan-aplikasi-web-pwa). |
 | Lirik tiba-tiba berganti ke video YouTube | Tidak akan terjadi lagi: sumber video (`youtube`, `netflix`) tidak memicu pencarian lirik. Kalau masih terjadi, cek baris **Sumber terdeteksi** di `powertools doctor` — sumbernya mungkin masih `brave` karena ekstensi GNOME belum diperbarui (logout/login sekali). |
 | PWA tetap terdeteksi sebagai `brave` | Cek `powertools doctor` → **Sumber terdeteksi**. Kalau sumbernya `brave` padahal PWA sedang memutar, jalankan `./install.sh` lalu logout/login: deteksi PWA butuh metode daftar jendela di ekstensi GNOME. |
@@ -983,11 +1009,15 @@ Hapus berkas itu (dan logout/login) setelah selesai.
   `resident: true` supaya proses tetap hidup dan status terus diperbarui.
 - Browser hanya mengekspos **satu sesi media aktif** per proses, jadi dua tab
   YouTube yang berputar bersamaan bisa tampil sebagai satu pemutar
-  (Chromium/Firefox), bukan dua. PWA dibedakan dari tab lewat **jendelanya**,
-  bukan lewat proses: Brave/Chromium menjalankan PWA di proses browser yang
-  sama. Kalau tab yang berbunyi sedang tidak terlihat (tab lain aktif di jendela
-  itu), judulnya tidak bisa dicocokkan dan PowerTools memakai PWA yang ada atau
-  nama browser.
+  (Chromium/Firefox), bukan dua. Island menambal ini dengan **tab jendela**:
+  setiap jendela peramban yang membuka media dapat tabnya sendiri (maksimal 4),
+  tetapi tab jendela hanya menampilkan judul — MPRIS tidak memberi progress,
+  seek, atau tombol putar untuk sesi yang tidak dilaporkannya. Tab di dalam
+  satu jendela tetap tidak bisa dipisah.
+- PWA dibedakan dari tab lewat **jendelanya**, bukan lewat proses:
+  Brave/Chromium menjalankan PWA di proses browser yang sama. Kalau tab yang
+  berbunyi sedang tidak terlihat (tab lain aktif di jendela itu), judulnya
+  tidak bisa dicocokkan dan PowerTools memakai PWA yang ada atau nama browser.
 - Lirik hanya untuk musik. Sumber video (`youtube`, `netflix`) tidak memicu
   pencarian lirik; lagu terakhir tetap tampil. Lirik untuk video musik di
   YouTube karena itu tidak tersedia — putar lagunya lewat YouTube Music atau
@@ -1071,12 +1101,15 @@ powertools/               aplikasi GTK4
 gnome-extension/powertools@local/   jembatan GNOME Shell
   extension.js                      clipboard, hotkey, pin lirik, autostart
   media.js                          dynamic island MPRIS
+  tabs.js                           penyusunan tab (pemutar + jendela browser)
   stylesheet.css                    gaya widget media
   schemas/                          pengaturan ekstensi
 tests/test_core.py                  tes unit inti
 tests/test_discord.py               tes IPC/activity Discord (tanpa Discord)
 tests/test_sources.py               tes penamaan sumber + preset + tipe activity
 tests/test_webapps.py               tes deteksi PWA (jendela + .desktop)
+tests/test_media_tabs.py            tes logika tab island (menjalankan gjs)
+tests/js/tabs_test.js               tes tabs.js (gjs, tanpa GNOME Shell)
 assets/                             ikon aplikasi (swiss-knife SVG + PNG 512)
 docs/                               tangkapan layar + tombol donasi
   donate.svg                        sumber tombol (SVG, 300x64)

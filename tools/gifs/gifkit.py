@@ -175,6 +175,7 @@ def encode_gif(
     colors: int = 128,
     loop: int = 0,
     source_fps: int = 12,
+    octree: bool = False,
 ) -> Path:
     """Gabung urutan PNG menjadi GIF berpalet.
 
@@ -182,6 +183,11 @@ def encode_gif(
     ffmpeg menghasilkan berkas 4-5x lebih besar (tiap frame ditulis penuh).
     Palet dibuat sekali dari beberapa frame lalu dipakai semua frame, supaya
     warna teks tidak berkedip antar frame.
+
+    ``octree`` memakai kuantisasi oktree, yang mempertahankan warna pekat
+    berarea kecil (mis. titik hijau penanda "sedang berbunyi" di tab island).
+    Kuantisasi median-cut membuang warna seperti itu karena jumlah pikselnya
+    kalah jauh dari latar gelap.
     """
     from PIL import Image
 
@@ -233,7 +239,8 @@ def encode_gif(
     strip = Image.new("RGB", (samples[0].width, samples[0].height * len(samples)))
     for index, img in enumerate(samples):
         strip.paste(img, (0, index * img.height))
-    palette = strip.quantize(colors=colors, method=Image.MEDIANCUT)
+    method = Image.FASTOCTREE if octree else Image.MEDIANCUT
+    palette = strip.quantize(colors=colors, method=method)
     # Tanpa dithering: UI ini berisi bidang warna rata dan teks kecil, jadi
     # pola titik justru mengotori teks dan membuat GIF 4-6x lebih besar.
     paletted = [img.quantize(palette=palette, dither=Image.NONE) for img in images]

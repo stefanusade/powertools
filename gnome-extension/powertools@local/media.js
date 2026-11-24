@@ -21,6 +21,8 @@ import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
+import {buildTabs, pidFromBusName, resolveTab} from './tabs.js';
+
 const BUS_PREFIX = 'org.mpris.MediaPlayer2';
 const PLAYER_IFACE = 'org.mpris.MediaPlayer2.Player';
 const ROOT_IFACE = 'org.mpris.MediaPlayer2';
@@ -32,6 +34,10 @@ const EXCLUDED_PLAYERS = new Set(['org.mpris.MediaPlayer2.playerctld']);
 
 const TICK_MS = 150;
 const POSITION_POLL_MS = 500;
+//: Seberapa sering daftar jendela dibaca ulang saat island tampil. Jendela
+//: tidak punya sinyal seperti MPRIS, jadi aplikasi web yang baru dibuka hanya
+//: ketahuan lewat pemeriksaan berkala.
+const WINDOW_SCAN_MS = 2000;
 const HIDE_GRACE_MS = 700;
 const MAX_ART_BYTES = 6 * 1024 * 1024;
 const ART_MAX_AGE_DAYS = 30;
@@ -256,6 +262,17 @@ export class MediaIsland {
         this._artToken = 0;
         this._soup = null;
 
+        //: Tab yang tampil sekarang (pemutar MPRIS + jendela browser).
+        this._tabs = [];
+        this._activeTab = null;
+        //: Tab yang diklik pengguna. Selama tabnya masih ada, island tidak
+        //: berpindah sendiri walau tab lain mulai berbunyi.
+        this._selectedKey = '';
+        this._lastTabsAt = 0;
+        this._tabsSignature = '';
+        //: Kelas jendela → nama aplikasi web, dibaca sekali per kelas.
+        this._appNames = new Map();
+
         this._signalIds = [];
         this._settingsIds = [];
 
@@ -460,20 +477,20 @@ export class MediaIsland {
         });
         progressRow.add_child(this._time);
         this._island.add_child(progressRow);
+        this._progressRow = progressRow;
 
-        this._chips = new St.Widget({
-            style_class: 'pt-media-chips',
+        // Tab ada di atas: satu tab per pemutar MPRIS, ditambah tab jendela
+        // browser (aplikasi web) yang tidak diekspos MPRIS. Dengan tab, dua
+        // sumber yang berbunyi bersamaan terlihat sekaligus.
+        // Baris tab disusun manual (bukan FlowLayout): FlowLayout melaporkan
+        // tinggi dua baris walau semua tab muat satu baris, sehingga muncul
+        // celah kosong di atas judul lagu.
+        this._tabBar = makeBox(true, 'pt-media-tabs', {
             visible: false,
             x_expand: true,
-            layout_manager: new Clutter.FlowLayout({
-                orientation: Clutter.Orientation.HORIZONTAL,
-                row_spacing: 6,
-                column_spacing: 6,
-            }),
         });
-        this._chips.layout_manager.row_spacing = 6;
-        this._chips.layout_manager.column_spacing = 6;
-        this._island.add_child(this._chips);
+        this._tabBar.layout_manager.spacing = 6;
+        this._island.insert_child_at_index(this._tabBar, 0);
 
         Main.layoutManager.addChrome(this._island, {
             affectsInputRegion: true,
@@ -549,6 +566,13 @@ export class MediaIsland {
             return GLib.SOURCE_REMOVE;
 
         const now = nowMs();
+        // Posisi pointer ikut dicatat saat log detail aktif: di shell bersarang
+        // gerakan relatif tidak dijepit ke tepi layar, jadi skrip perekaman GIF
+        // perlu membaca posisi sebenarnya sebelum menggeser pointer.
+        if (DEBUG) {
+            const [px, py] = global.get_pointer();
+            debug('pointer', px, py);
+        }
         if (this.enabled && !this._shown && !Main.sessionMode.isLocked &&
             !Main.overview.visible) {
             const [x, y, mods] = global.get_pointer();
@@ -637,7 +661,6 @@ export class MediaIsland {
             Math.max(ISLAND_MIN_WIDTH, monitor.width - 40)));
         if (this._island.width !== width)
             this._island.set_width(width);
-        this._chips.set_width(width - 28);
 
         const panelHeight = Main.panel?.height ?? 0;
         const panelAtTop = this._panelAtTop();
@@ -700,7 +723,7 @@ export class MediaIsland {
         });
         this._startUiTimer();
         console.log('[powertools-media] tampil:', reason,
-            this._active?.displayName() ?? '-');
+            this._activeTab?.label ?? '-');
     }
 
     _hide() {
@@ -759,6 +782,11 @@ export class MediaIsland {
         this._pollPosition();
 
         const now = nowMs();
+        // Jendela tidak memberi sinyal saat dibuka/ditutup, jadi daftar tab
+        // diperiksa berkala: aplikasi web yang baru dibuka ikut muncul.
+        if (now - this._lastTabsAt >= WINDOW_SCAN_MS)
+            this._refresh();
+
         const [x, y] = global.get_pointer();
         const keep = this._dragging || this._pointerInIsland() ||
             this._inHotZone(x, y);
@@ -800,124 +828,282 @@ export class MediaIsland {
         return this._visiblePlayers().some(player => player.isPlaying());
     }
 
-    _chooseActive(players) {
-        if (players.length === 0)
-            return null;
-
-        const current = players.find(player =>
-            player.owner === this._active?.owner);
-        const anyPlaying = players.some(player => player.isPlaying());
-        if (current && (current.isPlaying() || !anyPlaying))
-            return current;
-
-        const pool = anyPlaying
-            ? players.filter(player => player.isPlaying())
-            : players;
-        let best = pool[0];
-        for (const player of pool) {
-            if (player.lastChangeAt > best.lastChangeAt)
-                best = player;
+    // Jendela hanya bisa dibaca dari dalam shell. Dipanggil berkala saat island
+    // tampil karena jendela tidak punya sinyal seperti MPRIS.
+    _collectWindows() {
+        const windows = [];
+        let actors = [];
+        try {
+            actors = global.get_window_actors();
+        } catch (e) {
+            return windows;
         }
-        return best;
+        for (const actor of actors) {
+            const window = actor?.meta_window;
+            if (!window)
+                continue;
+            let pid = 0;
+            let wmClass = '';
+            let title = '';
+            try {
+                pid = window.get_pid();
+                wmClass = window.get_wm_class() ?? '';
+                title = window.get_title() ?? '';
+            } catch (e) {
+                continue;
+            }
+            if (!pid || !title)
+                continue;
+            windows.push({pid, wmClass, title});
+        }
+        return windows;
+    }
+
+    // Nama aplikasi web dibaca dari berkas .desktop yang dibuat browser saat
+    // aplikasi dipasang: namanya sama dengan kelas jendela PWA. Hasilnya
+    // diingat per kelas supaya tidak membaca berkas berulang kali.
+    _appNameFor(wmClass) {
+        const key = String(wmClass ?? '').trim();
+        if (!key)
+            return '';
+        if (this._appNames.has(key))
+            return this._appNames.get(key);
+
+        let name = '';
+        const dirs = [
+            GLib.build_filenamev([GLib.get_user_data_dir(), 'applications']),
+            '/usr/local/share/applications',
+            '/usr/share/applications',
+            GLib.build_filenamev([GLib.get_home_dir(),
+                '.local/share/flatpak/exports/share/applications']),
+            '/var/lib/flatpak/exports/share/applications',
+        ];
+        for (const dir of dirs) {
+            const path = GLib.build_filenamev([dir, `${key}.desktop`]);
+            if (!GLib.file_test(path, GLib.FileTest.EXISTS))
+                continue;
+            try {
+                const keyFile = new GLib.KeyFile();
+                keyFile.load_from_file(path, GLib.KeyFileFlags.NONE);
+                name = keyFile.get_string('Desktop Entry', 'Name').trim();
+            } catch (e) {
+                name = '';
+            }
+            if (name)
+                break;
+        }
+        this._appNames.set(key, name);
+        return name;
+    }
+
+    _buildTabs() {
+        const players = this._visiblePlayers().map(player => {
+            const metadata = player.metadata() ?? {};
+            return {
+                owner: player.owner,
+                pid: pidFromBusName(player.owner),
+                label: player.displayName(),
+                title: metadata.title ?? '',
+                artist: metadata.artist ?? '',
+                playing: player.isPlaying(),
+                lastChangeAt: player.lastChangeAt,
+            };
+        });
+        // Hanya jendela milik proses pemutar yang dibaca: judul jendela lain
+        // tidak ada urusannya dengan island.
+        const pids = new Set(players.map(player => player.pid).filter(Boolean));
+        const windows = this._collectWindows()
+            .filter(window => pids.has(window.pid));
+        return buildTabs({
+            players,
+            windows,
+            appNameFor: wmClass => this._appNameFor(wmClass),
+        });
     }
 
     _refresh(force = false) {
-        const players = this._visiblePlayers();
-        this._active = this._chooseActive(players);
-        if (!this._active) {
+        const tabs = this._buildTabs();
+        // buildTabs hanya bekerja dengan data biasa; kembalikan objek pemutar
+        // aslinya supaya kontrol tetap bisa memanggil D-Bus.
+        for (const tab of tabs) {
+            if (tab.kind === 'player')
+                tab.player = this._players.get(tab.key.slice(2)) ?? null;
+        }
+        this._tabs = tabs;
+        this._lastTabsAt = nowMs();
+
+        // Pemeriksaan jendela berkala tidak perlu membangun ulang tombol tab
+        // kalau isinya sama; membangun ulang terus-menerus membuat tab
+        // berkedip dan menghapus status hover.
+        const signature = tabs
+            .map(tab => [tab.key, tab.label, tab.playing, tab.title].join('\u0001'))
+            .join('\u0002');
+        const changed = signature !== this._tabsSignature;
+        this._tabsSignature = signature;
+
+        if (this._selectedKey &&
+            !tabs.some(tab => tab.key === this._selectedKey))
+            this._selectedKey = '';
+
+        const tab = resolveTab(tabs, this._selectedKey);
+        if (!tab) {
+            this._activeTab = null;
+            this._active = null;
             if (this._shown)
                 this._hide();
             return;
         }
-        if (force || this._shown)
-            this._render(players, this._active);
+
+        this._activeTab = tab;
+        this._active = tab.kind === 'player' ? tab.player : null;
+        if (force || (this._shown && changed))
+            this._render(tabs, tab);
     }
 
-    _render(players, player) {
-        const metadata = player.metadata();
+    _selectTab(key) {
+        this._selectedKey = key;
+        this._autoHideAt = nowMs() + this.popupMs;
+        // Jangan hancurkan tombol yang sedang mengirim sinyal "clicked"; render
+        // ulang setelah sinyal selesai.
+        GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+            if (!this._destroyed && this._shown)
+                this._refresh(true);
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _render(tabs, tab) {
+        this._renderTabs(tabs, tab);
+        if (tab.kind === 'window') {
+            this._renderWindow(tab);
+            return;
+        }
+
+        const player = tab.player;
+        const metadata = player?.metadata();
         if (!metadata)
             return;
 
         this._title.text = metadata.title || 'Tanpa judul';
-        const source = player.displayName();
+        const source = tab.label || player.displayName();
         this._artist.text = metadata.artist
-            ? (players.length > 1 ? metadata.artist : `${metadata.artist} · ${source}`)
+            ? (tabs.length > 1 ? metadata.artist : `${metadata.artist} · ${source}`)
             : source;
 
         const playing = player.isPlaying();
         this._playIcon.icon_name = playing
             ? 'media-playback-pause-symbolic'
             : 'media-playback-start-symbolic';
+        this._play.opacity = 255;
         this._prev.opacity = player.canGoPrevious() ? 255 : 90;
         this._next.opacity = player.canGoNext() ? 255 : 90;
+        this._progressRow.visible = true;
 
-        this._renderChips(players, player);
         this._setCover(metadata.artUrl);
         this._updateProgress();
     }
 
-    _renderChips(players, active) {
-        this._chips.destroy_all_children();
-        if (players.length <= 1) {
-            this._chips.visible = false;
+    // Tab jendela: MPRIS tidak melaporkan posisi, durasi, atau kontrol untuk
+    // sesi yang tidak dieksposnya, jadi hanya judul yang ditampilkan. Kontrol
+    // diredupkan, bukan disembunyikan, supaya tata letak tab tidak melompat.
+    _renderWindow(tab) {
+        this._title.text = tab.title || tab.label || 'Jendela browser';
+        this._artist.text = tab.detail ?? tab.label;
+        this._playIcon.icon_name = 'media-playback-start-symbolic';
+        this._play.opacity = 90;
+        this._prev.opacity = 90;
+        this._next.opacity = 90;
+        this._progressRow.visible = false;
+        this._time.text = '';
+        this._setCover('');
+    }
+
+    // Lebar tab diperkirakan dari panjang label, bukan diukur: label selalu
+    // bisa dipotong dengan elipsis, dan lebar tetap membuat baris tab tidak
+    // melompat saat judul lagu berganti.
+    _tabWidth(text) {
+        return clamp(26 + String(text).length * 7, 62, 150);
+    }
+
+    _renderTabs(tabs, active) {
+        this._tabBar.destroy_all_children();
+        if (tabs.length <= 1) {
+            this._tabBar.visible = false;
             return;
         }
 
         const totals = {};
-        for (const player of players) {
-            const name = player.displayName();
-            totals[name] = (totals[name] ?? 0) + 1;
-        }
-
+        for (const tab of tabs)
+            totals[tab.label] = (totals[tab.label] ?? 0) + 1;
         const seen = {};
-        for (const player of players) {
-            const name = player.displayName();
-            let text = name;
-            if (totals[name] > 1) {
-                seen[name] = (seen[name] ?? 0) + 1;
-                text = `${name} ${seen[name]}`;
+
+        const available = Math.max(120, (this._island.width || ISLAND_WIDTH) - 32);
+        const spacing = 6;
+        let row = makeBox(false, null, {x_expand: true});
+        row.layout_manager.spacing = spacing;
+        this._tabBar.add_child(row);
+        let used = 0;
+
+        for (const tab of tabs) {
+            let text = tab.label;
+            if (totals[tab.label] > 1) {
+                seen[tab.label] = (seen[tab.label] ?? 0) + 1;
+                text = `${text} ${seen[tab.label]}`;
+            }
+
+            const width = this._tabWidth(text);
+            if (used > 0 && used + width > available) {
+                row = makeBox(false, null, {x_expand: true});
+                row.layout_manager.spacing = spacing;
+                this._tabBar.add_child(row);
+                used = 0;
+            }
+            used += width + spacing;
+
+            const content = makeBox(false, null, {
+                y_align: Clutter.ActorAlign.CENTER,
+            });
+            content.layout_manager.spacing = 5;
+
+            if (tab.playing) {
+                content.add_child(new St.Widget({
+                    style_class: 'pt-media-tab-dot',
+                    y_align: Clutter.ActorAlign.CENTER,
+                }));
             }
 
             const label = new St.Label({
                 text,
-                style_class: 'pt-media-chip-label',
+                style_class: 'pt-media-tab-label',
             });
             label.clutter_text.ellipsize = Pango.EllipsizeMode.END;
             label.clutter_text.line_wrap = false;
-            label.set_width(88);
+            label.set_width(width - 20);
+            content.add_child(label);
 
-            const chip = new St.Button({
-                style_class: 'pt-media-chip',
+            const button = new St.Button({
+                style_class: 'pt-media-tab',
                 can_focus: false,
                 reactive: true,
                 track_hover: true,
-                child: label,
-                width: 108,
+                child: content,
             });
-            if (player.owner === active.owner)
-                chip.add_style_class_name('pt-media-chip-active');
-            chip.connect('clicked', () => {
-                this._active = player;
-                this._autoHideAt = nowMs() + this.popupMs;
-                // Jangan hancurkan tombol yang sedang mengirim sinyal
-                // "clicked"; render ulang setelah sinyal selesai.
-                GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
-                    const playersNow = this._visiblePlayers();
-                    if (!this._destroyed && this._shown &&
-                        playersNow.includes(player))
-                        this._render(playersNow, player);
-                    return GLib.SOURCE_REMOVE;
-                });
-            });
-            this._chips.add_child(chip);
+            if (tab.kind === 'window')
+                button.add_style_class_name('pt-media-tab-window');
+            if (tab.key === active.key)
+                button.add_style_class_name('pt-media-tab-active');
+            button.connect('clicked', () => this._selectTab(tab.key));
+            row.add_child(button);
         }
-        this._chips.visible = true;
+        this._tabBar.visible = true;
     }
 
     _updateProgress() {
         const player = this._active;
-        if (!player)
+        if (!player) {
+            this._time.text = '';
             return;
+        }
         const metadata = player.metadata();
         if (!metadata)
             return;
@@ -1131,7 +1317,6 @@ export class MediaIsland {
                 if (announce && player.isPlaying() &&
                     player.metadata()?.title) {
                     player.lastChangeAt = nowMs();
-                    this._active = player;
                     this._refresh();
                     this._show('change');
                 }
@@ -1180,6 +1365,8 @@ export class MediaIsland {
 
         if (this._active?.owner === owner)
             this._active = null;
+        if (this._selectedKey === `p:${owner}`)
+            this._selectedKey = '';
         this._refresh();
         if (!this._hasVisiblePlayer())
             this._hide();
@@ -1209,8 +1396,6 @@ export class MediaIsland {
                 player.positionUs = 0;
                 player.positionAt = GLib.get_monotonic_time();
                 player.positionToken++;
-                if (player.isPlaying())
-                    this._active = player;
                 this._refresh();
                 if (metadata?.title)
                     this._show('change');
@@ -1233,7 +1418,6 @@ export class MediaIsland {
             player.lastStatus = status;
             if (status === 'Playing' && !wasPlaying) {
                 player.lastChangeAt = nowMs();
-                this._active = player;
                 this._refresh();
                 this._show('change');
             } else {
