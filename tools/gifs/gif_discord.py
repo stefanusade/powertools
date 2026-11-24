@@ -71,8 +71,9 @@ def on_activate(application):
 
         return run
 
-    # Spotify → "Spotify" (0=Otomatis, 1=PowerTools, 2=YouTube Music,
-    # 3=Spotify, 4=Netflix, 5=YouTube)
+    # 0=Otomatis, 1=PowerTools, 2=YouTube Music, 3=Spotify, 4=Netflix,
+    # 5=YouTube.
+    scene.at(2.2, pick("youtube-music", 2))
     scene.at(3.0, pick("spotify", 3))
     # YouTube → "YouTube": kata kerjanya jadi "Watching".
     scene.at(4.4, pick("youtube", 5))

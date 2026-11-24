@@ -864,15 +864,22 @@ Yang dicek: GTK, GNOME Shell, ekstensi terpasang/aktif, status jembatan D-Bus,
 shortcut, **status autostart (systemd/GNOME/D-Bus)**, jumlah item riwayat, portal,
 dan tool screenshot.
 
+Baris **Deteksi PWA** menunjukkan apakah ekstensi GNOME yang **sedang berjalan**
+sudah bisa memberi daftar jendela. Kalau isinya "belum", kode ekstensi lama
+masih dipakai: jalankan `./install.sh` lalu logout/login sekali.
+
 Untuk Discord, `doctor` juga menampilkan **sumber lagu yang sedang aktif**
-(`spotify`, `brave`, `youtube-music`, …), preset yang dipakai untuk sumber itu,
-dan apakah covernya bisa diambil Discord:
+(`spotify`, `youtube`, `youtube-music`, …), preset yang dipakai untuk sumber
+itu, dan apakah covernya bisa diambil Discord:
 
 ```
+Jembatan aktif   : ya
+Deteksi PWA      : ya (jendela + aplikasi web)
 Discord          : aktif (socket ditemukan)
-Discord sumber   : Brave=YouTube Music
+Discord sumber   : VLC=PowerTools (umum)
 Discord preset   : PowerTools (umum)=1573948090166288504, YouTube Music=1573959687760646274, Spotify=1574690633262567494, Netflix=1574693531161731112, YouTube=1574695288088559706
-Sumber terdeteksi: Brave (brave) "Stand by Me" — pilihan di Pengaturan — YouTube Music, app 1573959687760646274
+Discord cadangan : tidak dikirim untuk sumber tanpa preset
+Sumber terdeteksi: YouTube Music (youtube-music) "Peron" — preset sumber — YouTube Music, app 1573959687760646274
 Cover            : file lokal (tidak bisa diambil Discord) — unggah Art Asset lalu set discord.fallback_asset
 ```
 
