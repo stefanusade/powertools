@@ -1,4 +1,4 @@
-"""Tes deteksi PWA dari proses pemutar MPRIS (tanpa D-Bus)."""
+"""Tes deteksi PWA dari jendela pemutar MPRIS (tanpa D-Bus/shell)."""
 
 from __future__ import annotations
 
@@ -11,13 +11,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from powertools import webapps
 from powertools.webapps import (
-    app_id_from_cmdline,
+    app_id_from_class,
     app_name_for_owner,
     clear_cache,
     desktop_name_for_app_id,
     pid_from_owner,
-    read_cmdline,
+    pwa_id_from_windows,
+    windows_for_owner,
 )
+
+PWA_ID = "cinhimbnkkaeohfgghhklpknlkffjgod"
 
 
 class PidTests(unittest.TestCase):
@@ -27,54 +30,29 @@ class PidTests(unittest.TestCase):
             10804,
         )
         self.assertEqual(
-            pid_from_owner("org.mpris.MediaPlayer2.chrome.instance42"),
-            42,
-        )
+            pid_from_owner("org.mpris.MediaPlayer2.chrome.instance42"), 42)
 
     def test_nama_tanpa_instance(self):
         for owner in ("org.mpris.MediaPlayer2.spotify", "", None):
             self.assertEqual(pid_from_owner(owner), 0)
 
 
-class CmdlineTests(unittest.TestCase):
-    def test_ambil_app_id(self):
-        line = (
-            "/opt/brave.com/brave/brave --profile-directory=Default "
-            "--app-id=cinhimbnkkaeohfgghhklpknlkffjgod"
-        )
+class ClassTests(unittest.TestCase):
+    def test_identitas_pwa_chromium(self):
+        for wm_class in (f"crx_{PWA_ID}", f"_crx_{PWA_ID}"):
+            self.assertEqual(app_id_from_class(wm_class), PWA_ID, wm_class)
+
+    def test_identitas_pwa_firefox(self):
         self.assertEqual(
-            app_id_from_cmdline(line), "cinhimbnkkaeohfgghhklpknlkffjgod")
+            app_id_from_class("FFPWA-01JCZ9W0K3"), "FFPWA-01JCZ9W0K3")
 
-    def test_browser_biasa_tanpa_app_id(self):
-        self.assertEqual(
-            app_id_from_cmdline("/usr/bin/brave --profile-directory=Default"),
-            "",
-        )
-        self.assertEqual(app_id_from_cmdline(""), "")
+    def test_id_tanpa_awalan(self):
+        self.assertEqual(app_id_from_class(PWA_ID), PWA_ID)
 
-    def test_ambil_app_id_firefox_pwa(self):
-        line = (
-            "/usr/lib/firefox/firefox -class FFPWA-01JCZ9W0K3 -name "
-            "FFPWA-01JCZ9W0K3"
-        )
-        self.assertEqual(
-            app_id_from_cmdline(line), "FFPWA-01JCZ9W0K3")
-
-    def test_cmdline_dibaca_dari_proc_tiruan(self):
-        root = Path(tempfile.mkdtemp(prefix="powertools-proc-"))
-        pid = 4321
-        (root / str(pid)).mkdir()
-        (root / str(pid) / "cmdline").write_bytes(
-            b"/usr/bin/brave\0--app-id=abc123\0"
-        )
-        text = read_cmdline(pid, root)
-        self.assertIn("--app-id=abc123", text)
-        self.assertEqual(app_id_from_cmdline(text), "abc123")
-
-    def test_proses_hilang(self):
-        root = Path(tempfile.mkdtemp(prefix="powertools-proc-"))
-        self.assertEqual(read_cmdline(9999, root), "")
-        self.assertEqual(read_cmdline(0, root), "")
+    def test_jendela_browser_biasa(self):
+        for wm_class in ("brave-browser", "Brave-browser", "firefox",
+                         "Navigator", "org.gnome.Nautilus", "", None):
+            self.assertEqual(app_id_from_class(wm_class), "", wm_class)
 
 
 class DesktopTests(unittest.TestCase):
@@ -98,8 +76,19 @@ class DesktopTests(unittest.TestCase):
             "[Desktop Entry]\nName=Netflix\n"
             "Exec=/usr/bin/chromium --app-id=xyz789\n",
         )
+        self.assertEqual(desktop_name_for_app_id("xyz789", [root]), "Netflix")
+
+    def test_nama_dari_startup_wm_class(self):
+        # Bentuk nyata berkas PWA Brave: id hanya ada di Exec dan
+        # StartupWMClass, nama berkas memuat id, tetapi id bisa juga hanya
+        # dikenali dari kelas jendelanya.
+        root = self._dir(
+            "aplikasi.desktop",
+            "[Desktop Entry]\nName=YouTube Music\n"
+            f"StartupWMClass=crx_{PWA_ID}\n",
+        )
         self.assertEqual(
-            desktop_name_for_app_id("xyz789", [root]), "Netflix")
+            desktop_name_for_app_id(PWA_ID, [root]), "YouTube Music")
 
     def test_app_id_tidak_dikenal(self):
         root = self._dir(
@@ -110,53 +99,126 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual(desktop_name_for_app_id("", [root]), "")
 
 
+class WindowMatchTests(unittest.TestCase):
+    """Inti perbaikan: satu proses browser, banyak jendela."""
+
+    PWA = f"crx_{PWA_ID}"
+    BROWSER = "brave-browser"
+
+    def test_tab_biasa_yang_memutar_bukan_pwa(self):
+        # Kasus nyata: YouTube di tab, YouTube Music sebagai PWA (dijeda).
+        windows = [
+            (self.PWA, "YouTube Music"),
+            (self.BROWSER,
+             "Saya kira HP ini HOAX doang... Ternyata beneran - Brave"),
+        ]
+        self.assertEqual(
+            pwa_id_from_windows(
+                "Saya kira HP ini HOAX doang... Ternyata beneran ada",
+                windows,
+            ),
+            "",
+        )
+
+    def test_pwa_yang_memutar_dikenali(self):
+        windows = [
+            (self.BROWSER, "Beranda - Brave"),
+            (self.PWA, "ANTIFRAGILE - LE SSERAFIM - YouTube Music"),
+        ]
+        self.assertEqual(pwa_id_from_windows("ANTIFRAGILE", windows), PWA_ID)
+
+    def test_judul_pendek_tidak_dicocokkan(self):
+        windows = [
+            (self.PWA, "Lagu - YouTube Music"),
+            (self.BROWSER, "Beranda - Brave"),
+        ]
+        self.assertEqual(pwa_id_from_windows("Lagu", windows), "")
+
+    def test_semua_jendela_pwa_yang_sama(self):
+        windows = [(self.PWA, "YouTube Music"), (self.PWA, "Antrian")]
+        self.assertEqual(
+            pwa_id_from_windows("Tanpa judul cocok", windows), PWA_ID)
+
+    def test_pwa_dan_tab_tanpa_cocok_judul(self):
+        windows = [(self.PWA, "YouTube Music"), (self.BROWSER, "Beranda")]
+        self.assertEqual(pwa_id_from_windows("Judul lain sekali", windows), "")
+
+    def test_tanpa_jendela(self):
+        self.assertEqual(pwa_id_from_windows("Judul apa saja", []), "")
+        self.assertEqual(pwa_id_from_windows("Judul apa saja", None), "")
+
+
 class OwnerTests(unittest.TestCase):
     def setUp(self) -> None:
         clear_cache()
         self.addCleanup(clear_cache)
-        self.proc = Path(tempfile.mkdtemp(prefix="powertools-proc-"))
         self.apps = Path(tempfile.mkdtemp(prefix="powertools-apps-"))
-        (self.apps / "brave-abc123-Default.desktop").write_text(
+        (self.apps / f"brave-{PWA_ID}-Default.desktop").write_text(
             "[Desktop Entry]\nName=YouTube Music\n", encoding="utf-8")
+        self.owner = "org.mpris.MediaPlayer2.brave.instance4242"
 
-    def _owner(self, pid: int, cmdline: str) -> str:
-        (self.proc / str(pid)).mkdir()
-        (self.proc / str(pid) / "cmdline").write_bytes(cmdline.encode())
-        return f"org.mpris.MediaPlayer2.brave.instance{pid}"
-
-    def test_pwa_dikenali(self):
-        owner = self._owner(101, "/usr/bin/brave\0--app-id=abc123\0")
+    def test_pwa_terbukti(self):
         self.assertEqual(
-            app_name_for_owner(owner, proc=self.proc, dirs=[self.apps]),
+            app_name_for_owner(
+                self.owner,
+                "ANTIFRAGILE",
+                dirs=[self.apps],
+                windows=[(f"crx_{PWA_ID}", "ANTIFRAGILE - YouTube Music")],
+            ),
             "YouTube Music",
         )
 
-    def test_browser_biasa_tidak_punya_nama_aplikasi(self):
-        owner = self._owner(102, "/usr/bin/brave\0")
+    def test_tab_biasa_tidak_punya_nama_aplikasi(self):
         self.assertEqual(
-            app_name_for_owner(owner, proc=self.proc, dirs=[self.apps]), "")
-
-    def test_hasil_di_cache(self):
-        owner = self._owner(103, "/usr/bin/brave\0--app-id=abc123\0")
-        self.assertEqual(
-            app_name_for_owner(owner, proc=self.proc, dirs=[self.apps]),
-            "YouTube Music",
+            app_name_for_owner(
+                self.owner,
+                "Video panjang sekali",
+                dirs=[self.apps],
+                windows=[("brave-browser", "Video panjang sekali - Brave")],
+            ),
+            "",
         )
-        # Berkas .desktop dihapus: hasil lama tetap dipakai selama PWA sama.
-        for path in self.apps.glob("*.desktop"):
-            path.unlink()
-        self.assertEqual(
-            app_name_for_owner(owner, proc=self.proc, dirs=[self.apps]),
-            "YouTube Music",
-        )
-        self.assertEqual(webapps._CACHE["abc123"], "YouTube Music")
 
-    def test_hasil_kosong_tidak_di_cache(self):
-        # PWA bisa dipasang setelah aplikasi berjalan; nama harus dicari ulang.
-        owner = self._owner(104, "/usr/bin/brave\0--app-id=baru\0")
+    def test_tanpa_jendela_tidak_menebak(self):
+        # Ekstensi lama / shell tidak tersedia: jangan mengarang PWA.
         self.assertEqual(
-            app_name_for_owner(owner, proc=self.proc, dirs=[self.apps]), "")
-        self.assertNotIn("baru", webapps._CACHE)
+            app_name_for_owner(self.owner, "Video", dirs=[self.apps], windows=[]),
+            "",
+        )
+
+
+class BridgeTests(unittest.TestCase):
+    """Jembatan yang tidak mendukung daftar jendela hanya dicoba sekali."""
+
+    def setUp(self) -> None:
+        clear_cache()
+        self.addCleanup(clear_cache)
+        self.calls = 0
+        self.original = webapps.bridge_windows
+
+        def fake(pid, timeout_ms=400):
+            self.calls += 1
+            return None
+
+        webapps.bridge_windows = fake
+        self.addCleanup(setattr, webapps, "bridge_windows", self.original)
+
+    def test_ekstensi_lama_diingat(self):
+        owner = "org.mpris.MediaPlayer2.brave.instance77"
+        self.assertEqual(windows_for_owner(owner), [])
+        self.assertEqual(windows_for_owner(owner), [])
+        self.assertEqual(self.calls, 1)
+
+    def test_muat_ulang_mencoba_lagi(self):
+        owner = "org.mpris.MediaPlayer2.brave.instance77"
+        windows_for_owner(owner)
+        clear_cache()
+        windows_for_owner(owner)
+        self.assertEqual(self.calls, 2)
+
+    def test_tanpa_pid_tidak_memanggil(self):
+        self.assertEqual(windows_for_owner("org.mpris.MediaPlayer2.spotify"), [])
+        self.assertEqual(self.calls, 0)
 
 
 if __name__ == "__main__":

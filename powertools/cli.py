@@ -258,7 +258,7 @@ def _detected_source() -> tuple[str, str, str] | None:
             owner,
             title,
             album,
-            app_name=app_name_for_owner(owner),
+            app_name=app_name_for_owner(owner, title),
             url=url,
         )
         return source, title, art

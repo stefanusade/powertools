@@ -122,6 +122,10 @@ def _css_text() -> str:
         font-size: 8.4pt;
         color: {p["faint"]};
     }}
+    .pt-warn {{
+        font-size: 8.4pt;
+        color: {p["accent"]};
+    }}
     .pt-preview {{
         font-size: 10pt;
         color: {p["text"]};

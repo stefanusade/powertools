@@ -257,18 +257,25 @@ dikirimnya.
 Karena itu sumber browser ditentukan berurutan:
 
 1. **Aplikasi web (PWA)** — kalau layanan dipasang sebagai aplikasi lewat
-   browser (mis. YouTube Music), prosesnya terpisah dan membawa penanda
-   `--app-id=…` (Chromium, Brave, Chrome, Edge, Vivaldi, Opera) atau
-   `FFPWA-…` (Firefox PWA). PowerTools membaca `/proc/<pid>/cmdline`,
-   mencocokkannya dengan berkas `.desktop` buatan browser, lalu memakai nama
-   aplikasinya. PWA YouTube Music menjadi sumber `youtube-music`, bukan
-   `brave`, sehingga tab YouTube biasa dan aplikasi YouTube Music bisa memakai
-   judul berbeda.
+   browser (mis. YouTube Music), jendelanya punya identitas sendiri:
+   `crx_<app-id>` untuk Chromium, Brave, Chrome, Edge, Vivaldi, Opera, dan
+   `FFPWA-…` untuk Firefox PWA. PowerTools meminta daftar jendela proses
+   browser ke ekstensi GNOME, lalu memilih jendela yang **judulnya memuat judul
+   lagu**. Kalau jendela itu PWA, nama aplikasinya diambil dari berkas
+   `.desktop` buatan browser (lewat `StartupWMClass`); kalau jendela itu browser
+   biasa, lagunya dari tab dan sumbernya tetap nama browser. PWA YouTube Music
+   menjadi sumber `youtube-music`, bukan `brave`, sehingga tab YouTube biasa dan
+   aplikasi YouTube Music bisa memakai judul berbeda.
 2. **`xesam:url`** — sebagian pemutar mengirim URL; kalau ada, domainnya
    menentukan sumber (`music.youtube.com` → `youtube-music`, `youtube.com` →
    `youtube`, `netflix.com` → `netflix`).
 3. **Judul/album** — berhasil untuk YouTube ("… - YouTube") dan SoundCloud.
 4. **Nama browser** — sisanya menjadi `brave`, `firefox`, dan seterusnya.
+
+Pembedaan PWA butuh **ekstensi GNOME versi terbaru** (dipasang oleh
+`install.sh`) dan baru aktif setelah **logout lalu login lagi** — GNOME Shell
+menyimpan kode ekstensi selama sesi berjalan. Selama ekstensi belum diperbarui,
+PowerTools tidak menebak: sumbernya tetap nama browser, bukan PWA yang salah.
 
 Artinya: kalau Anda memutar YouTube di tab biasa **dan** YouTube Music sebagai
 PWA, keduanya adalah pemutar berbeda, tetapi Discord hanya bisa menampilkan
@@ -905,6 +912,7 @@ mati dan `gnome-extensions info` menampilkan `State: INITIALIZED` dengan
 | Fitur baru tidak muncul di GUI / hotkey | Yang dijalankan adalah salinan terpasang di `~/.local/share/powertools/app`, bukan folder repo. Jalankan `./install.sh` lagi, tutup-buka jendela Pengaturan, lalu logout/login sekali untuk ekstensi GNOME. |
 | Status/tampilan Discord tidak sesuai | Pastikan modul **Discord Listening** aktif dan aplikasi Discord desktop sedang berjalan, `resident` bernilai `true`, serta `powertools doctor` menunjukkan preset Application ID yang dipakai. Cek socket dengan `ls "$XDG_RUNTIME_DIR"/discord-ipc-*` (Flatpak: `"$XDG_RUNTIME_DIR"/app/com.discordapp.Discord/`). |
 | Sumber di Pengaturan tidak cocok dengan aplikasi yang terbuka | Daftar diambil dari pemutar MPRIS yang benar-benar terbuka; tekan **Muat ulang daftar aplikasi**. Pemutar tanpa sesi media (belum memutar apa pun) belum punya nama MPRIS, jadi belum muncul. |
+| Aplikasi web (PWA) tidak terdeteksi terpisah dari browsernya | Pembedaan PWA memakai daftar jendela dari ekstensi GNOME, dan kode ekstensi hanya dimuat saat login. Jalankan `./install.sh`, lalu **logout dan login lagi**; Pengaturan menampilkan peringatan selama metode itu belum tersedia. |
 | Dua tab browser memakai judul yang sama | MPRIS hanya satu pemutar per proses browser. Pasang layanan sebagai PWA (mis. YouTube Music) agar punya sumber sendiri, atau petakan baris browser ke preset yang paling sering dipakai. Lihat [sumber di browser](#sumber-di-browser-dan-aplikasi-web-pwa). |
 | Judulnya "Listening to PowerTools", bukan nama pemutar | Discord memakai **nama aplikasi** preset, bukan nama pemutar. YouTube Music, Spotify, Netflix, dan YouTube punya preset sendiri; untuk sumber lain pilih baris sumbernya di **Pengaturan → Discord Listening** lalu ganti dropdown presetnya. Lihat [kata kerja dan judul](#kata-kerja-dan-judul-mengikuti-preset). |
 | Gambar album tampil "?" | Cover dari browser berupa file lokal `file:///tmp/...`, atau aplikasi Discord belum punya ikon. Unggah **App Icon** di General Information, dan/atau asset di **Rich Presence → Art Assets** lalu `powertools config set discord.fallback_asset <nama asset>`. Cek sumber dengan `powertools doctor`. |
@@ -1025,7 +1033,7 @@ powertools/               aplikasi GTK4
   discord.py              klien IPC Discord Rich Presence (Listening to/Watching)
   sources.py              penamaan sumber MPRIS + preset Application ID + tipe activity
   mpris.py                pemantau MPRIS untuk lagu & posisi
-  webapps.py              deteksi PWA browser dari proses + berkas .desktop
+  webapps.py              deteksi PWA browser dari jendela + berkas .desktop
   store.py                riwayat append-only, pin, hapus, kompresi, kuota gambar
   matcher.py              fuzzy match, kalkulator aman, persen
   apps.py                 indeks .desktop + frecency
@@ -1042,7 +1050,7 @@ gnome-extension/powertools@local/   jembatan GNOME Shell
 tests/test_core.py                  tes unit inti
 tests/test_discord.py               tes IPC/activity Discord (tanpa Discord)
 tests/test_sources.py               tes penamaan sumber + preset + tipe activity
-tests/test_webapps.py               tes deteksi PWA (proses + .desktop)
+tests/test_webapps.py               tes deteksi PWA (jendela + .desktop)
 assets/                             ikon aplikasi (swiss-knife SVG + PNG 512)
 docs/                               tangkapan layar + tombol donasi
   donate.svg                        sumber tombol (SVG, 300x64)

@@ -58,6 +58,10 @@ const DBUS_XML = `
       <arg type="b" direction="in" name="skip"/>
       <arg type="b" direction="out" name="ok"/>
     </method>
+    <method name="GetWindows">
+      <arg type="u" direction="in" name="pid"/>
+      <arg type="a(ss)" direction="out" name="windows"/>
+    </method>
     <signal name="Changed"/>
   </interface>
 </node>`;
@@ -1399,6 +1403,48 @@ export default class PowerToolsExtension extends Extension {
         this._hideLyricsTaskbar = Boolean(skip);
         this._applyLyricsTaskbar(window);
         return true;
+    }
+
+    // Daftar jendela milik satu proses, untuk membedakan aplikasi web (PWA)
+    // dari tab browser biasa. Keduanya berbagi satu proses browser dan satu
+    // pemutar MPRIS, jadi satu-satunya pembeda yang bisa dipercaya adalah
+    // jendela: PWA punya identitas jendela sendiri (crx_<id> / FFPWA-<id>).
+    // pid 0 berarti semua jendela.
+    GetWindows(pid) {
+        const windows = [];
+        const others = [];
+        let actors = [];
+        try {
+            actors = global.get_window_actors();
+        } catch (e) {
+            logError(e, 'PowerTools: gagal membaca daftar jendela');
+            return [];
+        }
+        for (const actor of actors) {
+            const window = actor.meta_window;
+            if (!window)
+                continue;
+            let entry = null;
+            let windowPid = 0;
+            try {
+                entry = [
+                    window.get_wm_class() || '',
+                    window.get_title() || '',
+                ];
+                windowPid = window.get_pid();
+            } catch (e) {
+                // Satu jendela rusak tidak boleh menghapus sisanya.
+                continue;
+            }
+            if (!pid || windowPid === pid)
+                windows.push(entry);
+            else
+                others.push(entry);
+        }
+        // Sebagian klien Wayland tidak melaporkan PID. Daripada kehilangan
+        // semua info, kembalikan seluruh jendela; pemanggil tetap mensyaratkan
+        // identitas PWA dan judul yang cocok sebelum memakai hasilnya.
+        return windows.length ? windows : (pid ? others : windows);
     }
 
     // ------------------------------------------------------------ ikon panel

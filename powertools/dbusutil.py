@@ -57,6 +57,49 @@ def _call_bridge(method: str, args: GLib.Variant | None, timeout_ms: int) -> boo
     except GLib.Error:
         return False
 
+def bridge_windows(
+    pid: int, timeout_ms: int = 500
+) -> list[tuple[str, str]] | None:
+    """Daftar jendela milik ``pid`` sebagai ``(wm_class, judul)``.
+
+    Diambil dari ekstensi GNOME: hanya shell yang bisa melihat kelas jendela
+    di Wayland. ``pid`` 0 berarti semua jendela. Mengembalikan ``None`` kalau
+    jembatan tidak tersedia atau ekstensinya belum punya metode ini (versi
+    lama); list kosong berarti shell menjawab tetapi tidak ada jendela.
+    """
+    bus = session_bus()
+    if bus is None:
+        return None
+    try:
+        reply = bus.call_sync(
+            BRIDGE_NAME,
+            BRIDGE_PATH,
+            BRIDGE_IFACE,
+            "GetWindows",
+            GLib.Variant("(u)", (max(0, int(pid)),)),
+            GLib.VariantType.new("(a(ss))"),
+            Gio.DBusCallFlags.NONE,
+            timeout_ms,
+            None,
+        )
+        raw = reply.unpack()[0]
+    except (GLib.Error, TypeError, ValueError):
+        return None
+    windows: list[tuple[str, str]] = []
+    for item in raw or ():
+        try:
+            wm_class, title = item
+        except (TypeError, ValueError):
+            continue
+        windows.append((str(wm_class or ""), str(title or "")))
+    return windows
+
+
+def bridge_windows_available(timeout_ms: int = 400) -> bool:
+    """True kalau ekstensi terpasang sudah mendukung daftar jendela."""
+    return bridge_windows(0, timeout_ms) is not None
+
+
 def paste_previous(timeout_ms: int = 2500) -> bool:
     """Minta ekstensi menekan Ctrl+V di jendela yang fokus sebelum popup.
 

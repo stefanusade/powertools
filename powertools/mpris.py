@@ -114,7 +114,7 @@ def list_sources() -> list[SourceInfo]:
             name,
             metadata["title"],
             metadata["album"],
-            app_name=app_name_for_owner(name),
+            app_name=app_name_for_owner(name, metadata["title"]),
             url=metadata.get("url", ""),
         )
         info = SourceInfo(
@@ -542,7 +542,8 @@ class MprisWatcher:
                         active.owner,
                         str(metadata.get("title") or ""),
                         str(metadata.get("album") or ""),
-                        app_name=app_name_for_owner(active.owner),
+                        app_name=app_name_for_owner(
+                            active.owner, str(metadata.get("title") or "")),
                         url=str(metadata.get("url") or ""),
                     ),
                 )

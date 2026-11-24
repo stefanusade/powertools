@@ -277,10 +277,10 @@ def source_key(
 
     Contoh: ``org.mpris.MediaPlayer2.brave.instance282140`` → ``brave``.
 
-    Untuk browser, kunci bisa lebih spesifik, berurutan:
+    For browser, kunci bisa lebih spesifik, berurutan:
 
-    1. ``app_name`` — PWA yang dipasang (mis. YouTube Music) punya proses dan
-       pemutar MPRIS sendiri; namanya diambil dari berkas .desktop.
+    1. ``app_name`` — PWA yang terbukti sedang memutar (dari kelas jendela +
+       judul lagu; lihat ``webapps``).
     2. ``url`` — kalau pemutar mengirim ``xesam:url``.
     3. judul/album — sebagian situs menyertakan namanya di metadata.
     4. nama browser itu sendiri.

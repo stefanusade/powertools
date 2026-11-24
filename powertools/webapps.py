@@ -1,14 +1,25 @@
 """Deteksi aplikasi web (PWA) dari pemutar MPRIS browser.
 
-Browser berbasis Chromium memasang PWA sebagai proses terpisah dengan
-``--app-id=<id>``. Proses itu punya pemutar MPRIS sendiri — nama busnya tetap
-``…brave.instance<PID>`` dan properti ``Identity`` tetap nama browser — jadi
-tanpa membaca proses, YouTube Music yang dipasang sebagai aplikasi web terlihat
-sama dengan tab Brave biasa.
+Browser berbasis Chromium dan Firefox mengekspos **satu** pemutar MPRIS per
+proses browser, bukan per tab atau per jendela. Aplikasi web yang dipasang
+lewat browser (mis. YouTube Music) bahkan bisa memakai proses yang sama dengan
+tab biasa: argumen ``--app-id`` hanya ada pada proses yang *pertama*
+dijalankan, jadi baris perintah tidak bisa dipakai untuk menebak.
 
-Modul ini membaca ``/proc/<PID>/cmdline`` untuk mengambil ``--app-id``, lalu
-mencari berkas ``.desktop`` yang dibuat browser saat PWA dipasang untuk
-mendapatkan nama aplikasinya. Semua lokal, tanpa D-Bus dan tanpa jaringan.
+Yang bisa dipercaya adalah jendelanya. PWA punya identitas jendela sendiri
+(``_crx_<app-id>`` untuk Chromium, ``FFPWA-<ulid>`` untuk Firefox PWA), dan
+identitas itu hanya terlihat oleh shell. Modul ini karena itu bertanya ke
+ekstensi GNOME lewat jembatan D-Bus, lalu:
+
+1. mencari jendela yang judulnya memuat judul lagu MPRIS — itulah jendela yang
+   sedang memutar. Kalau jendela itu PWA, sumbernya PWA; kalau jendela browser
+   biasa, berarti tab biasa;
+2. kalau tidak ada judul yang cocok, memakai PWA hanya bila *seluruh* jendela
+   proses itu adalah PWA yang sama — tidak ada tab yang bisa jadi sumbernya;
+3. selain itu menganggapnya tab browser biasa.
+
+Nama aplikasi diambil dari berkas ``.desktop`` yang dibuat browser saat PWA
+dipasang. Semua lokal: tanpa jaringan, tanpa membaca isi tab.
 """
 
 from __future__ import annotations
@@ -17,16 +28,20 @@ import re
 from pathlib import Path
 from typing import Iterable
 
+from .dbusutil import bridge_windows
+
 #: Akhiran nama bus MPRIS: ``…brave.instance10804`` → PID 10804.
 _INSTANCE = re.compile(r"instance(\d+)$")
 
-#: Argumen PWA Chromium/Brave/Chrome/Edge/Vivaldi/Opera.
-_APP_ID = re.compile(r"--app-id=([A-Za-z0-9]+)")
+#: Identitas jendela PWA Chromium/Brave/Chrome/Edge/Vivaldi/Opera. Chromium
+#: memakai ``_crx_<app-id>``; sebagian versi/lingkungan membuang garis bawah.
+_CHROMIUM_CLASS = re.compile(r"^_?crx_([A-Za-z0-9._-]+)$", re.IGNORECASE)
 
-#: Firefox PWA (proyek firefoxpwa) menjalankan Firefox dengan kelas jendela
-#: ``FFPWA-<ulid>``; berkas .desktop-nya bernama sama. Argumennya bisa
-#: ``--class=``, ``-class``, atau ``--name=``, jadi penandanya dicari langsung.
-_FFPWA = re.compile(r"(FFPWA-[A-Za-z0-9]+)")
+#: Identitas jendela Firefox PWA (proyek firefoxpwa).
+_FIREFOX_CLASS = re.compile(r"^(FFPWA-[A-Za-z0-9]+)$")
+
+#: Id ekstensi Chromium tanpa awalan (32 huruf a–p).
+_BARE_ID = re.compile(r"^([a-p]{32})$")
 
 #: Direktori berkas .desktop, dari yang paling spesifik ke sistem.
 APP_DIRS: tuple[str, ...] = (
@@ -38,10 +53,14 @@ APP_DIRS: tuple[str, ...] = (
     "/var/lib/snapd/desktop/applications",
 )
 
-#: Hasil per ``--app-id``; nama aplikasi tidak berubah selama PWA yang sama.
-#: Kunci per app-id (bukan per PID) supaya PID yang dipakai ulang tidak
-#: membawa nama lama.
-_CACHE: dict[str, str] = {}
+#: Panjang minimum judul lagu untuk dicocokkan. Judul sangat pendek ("Lagu")
+#: bisa muncul di jendela mana saja dan justru menyesatkan.
+MIN_TITLE = 8
+
+#: ``True``/``False`` setelah jembatan dihubungi; ``None`` sebelum itu. Ekstensi
+#: versi lama tidak punya metode daftar jendela, jadi hasilnya diingat supaya
+#: tidak memanggil D-Bus berulang kali hanya untuk gagal.
+_BRIDGE_OK: bool | None = None
 
 
 def pid_from_owner(owner: object) -> int:
@@ -55,46 +74,11 @@ def pid_from_owner(owner: object) -> int:
         return 0
 
 
-def read_cmdline(pid: int, proc: str | Path = "/proc") -> str:
-    """Isi ``cmdline`` proses sebagai satu baris, atau ``""``.
-
-    Chromium menulis seluruh argv sebagai satu argumen berisi spasi, jadi
-    pemisah NUL diganti spasi dan pencocokan dilakukan pada teks utuh.
-    """
-    if pid <= 0:
-        return ""
-    try:
-        raw = (Path(proc) / str(pid) / "cmdline").read_bytes()
-    except OSError:
-        return ""
-    return " ".join(
-        part.decode("utf-8", "replace") for part in raw.split(b"\0") if part
-    )
-
-
-def app_id_from_cmdline(cmdline: object) -> str:
-    """Penanda PWA dari baris perintah, atau ``""`` kalau bukan PWA.
-
-    Chromium memakai ``--app-id=<id>``; Firefox PWA memakai
-    ``--class=FFPWA-<ulid>``. Keduanya dipakai untuk mencari berkas .desktop
-    yang dibuat saat aplikasi web dipasang.
-    """
-    text = str(cmdline or "")
-    match = _APP_ID.search(text) or _FFPWA.search(text)
-    return match.group(1) if match else ""
-
-
-def _desktop_name(text: str) -> str:
-    """Nilai ``Name=`` pertama dari isi berkas .desktop."""
+def _desktop_field(text: str, field: str) -> str:
+    """Nilai ``field=`` pertama dari isi berkas .desktop."""
+    prefix = f"{field}="
     for line in text.splitlines():
-        if line.startswith("Name="):
-            return line.split("=", 1)[1].strip()
-    return ""
-
-
-def _desktop_exec(text: str) -> str:
-    for line in text.splitlines():
-        if line.startswith("Exec="):
+        if line.startswith(prefix):
             return line.split("=", 1)[1].strip()
     return ""
 
@@ -110,14 +94,19 @@ def desktop_name_for_app_id(
 ) -> str:
     """Nama aplikasi dari berkas .desktop milik PWA, atau ``""``.
 
-    Browser menamai berkasnya ``<browser>-<app-id>-<profil>.desktop``, tetapi
-    sebagian versi hanya mencantumkan ``--app-id`` di ``Exec``. Keduanya
-    dicocokkan supaya tidak bergantung pada satu penamaan.
+    Tiga jejak dicoba berurutan, karena penamaan berkas berbeda antar browser
+    dan versi:
+
+    1. nama berkas — ``brave-<app-id>-Default.desktop``,
+    2. ``StartupWMClass`` — Chrome/Brave menulis ``crx_<app-id>`` di sini,
+    3. ``Exec`` — sebagian hanya mencantumkan ``--app-id=<app-id>``.
     """
     needle = str(app_id or "").strip()
     if not needle:
         return ""
-    for directory in _app_dirs(dirs):
+
+    directories = _app_dirs(dirs)
+    for directory in directories:
         try:
             entries = sorted(directory.glob("*.desktop"))
         except OSError:
@@ -129,11 +118,11 @@ def desktop_name_for_app_id(
                 text = path.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 continue
-            name = _desktop_name(text)
+            name = _desktop_field(text, "Name")
             if name:
                 return name
-    # Berkas bisa dinamai lain; periksa Exec sebagai upaya terakhir.
-    for directory in _app_dirs(dirs):
+
+    for directory in directories:
         try:
             entries = sorted(directory.glob("*.desktop"))
         except OSError:
@@ -143,38 +132,119 @@ def desktop_name_for_app_id(
                 text = path.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 continue
-            if needle in _desktop_exec(text):
-                name = _desktop_name(text)
+            wm_class = _desktop_field(text, "StartupWMClass")
+            if wm_class and app_id_from_class(wm_class) == needle:
+                name = _desktop_field(text, "Name")
+                if name:
+                    return name
+    for directory in directories:
+        try:
+            entries = sorted(directory.glob("*.desktop"))
+        except OSError:
+            continue
+        for path in entries:
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            if needle in _desktop_field(text, "Exec"):
+                name = _desktop_field(text, "Name")
                 if name:
                     return name
     return ""
 
 
+def app_id_from_class(wm_class: object) -> str:
+    """Id PWA dari identitas jendela, atau ``""`` untuk jendela browser biasa."""
+    text = str(wm_class or "").strip()
+    if not text:
+        return ""
+    match = (
+        _CHROMIUM_CLASS.match(text)
+        or _FIREFOX_CLASS.match(text)
+        or _BARE_ID.match(text)
+    )
+    return match.group(1) if match else ""
+
+
+def _normalise(text: object) -> str:
+    return " ".join(str(text or "").lower().split())
+
+
+def _title_matches(track_title: str, window_title: str) -> bool:
+    """True kalau judul lagu muncul di judul jendela.
+
+    Judul jendela biasanya menambahkan nama browser ("… - Brave") atau nama
+    aplikasi ("… - YouTube Music"), jadi pencocokan dilakukan pada isi judul.
+    """
+    needle = _normalise(track_title)
+    if len(needle) < MIN_TITLE:
+        return False
+    haystack = _normalise(window_title)
+    return bool(haystack) and needle in haystack
+
+
+def pwa_id_from_windows(
+    track_title: object,
+    windows: Iterable[tuple[str, str]],
+) -> str:
+    """Id PWA yang sedang memutar lagu ini, atau ``""``.
+
+    ``windows`` adalah daftar ``(wm_class, judul)`` milik proses browser.
+    """
+    entries = list(windows or ())
+    if not entries:
+        return ""
+
+    title = str(track_title or "")
+    for wm_class, window_title in entries:
+        if _title_matches(title, window_title):
+            # Jendela pertama yang judulnya cocok adalah sumbernya. Kalau
+            # jendela itu browser biasa, berarti lagunya dari tab — bukan PWA.
+            return app_id_from_class(wm_class)
+
+    # Tidak ada judul yang cocok: aman hanya kalau seluruh jendela proses itu
+    # adalah PWA yang sama, karena tidak ada tab yang bisa jadi sumbernya.
+    ids = {app_id_from_class(wm_class) for wm_class, _title in entries}
+    if len(ids) == 1:
+        only = next(iter(ids))
+        if only:
+            return only
+    return ""
+
+
+def windows_for_owner(owner: object, timeout_ms: int = 400) -> list[tuple[str, str]]:
+    """Jendela milik proses pemutar, atau list kosong kalau tak bisa dibaca."""
+    global _BRIDGE_OK
+
+    pid = pid_from_owner(owner)
+    if pid <= 0 or _BRIDGE_OK is False:
+        return []
+    windows = bridge_windows(pid, timeout_ms)
+    if windows is None:
+        _BRIDGE_OK = False
+        return []
+    _BRIDGE_OK = True
+    return windows
+
+
 def app_name_for_owner(
     owner: object,
+    track_title: object = "",
     *,
-    proc: str | Path = "/proc",
     dirs: Iterable[str | Path] | None = None,
+    windows: Iterable[tuple[str, str]] | None = None,
 ) -> str:
-    """Nama aplikasi web yang memutar media, atau ``""`` untuk browser biasa."""
-    key = str(owner or "").strip()
-    if not key:
-        return ""
-
-    app_id = app_id_from_cmdline(read_cmdline(pid_from_owner(key), proc))
+    """Nama aplikasi web yang memutar media, atau ``""`` untuk tab biasa."""
+    if windows is None:
+        windows = windows_for_owner(owner)
+    app_id = pwa_id_from_windows(track_title, windows)
     if not app_id:
         return ""
-    if app_id in _CACHE:
-        return _CACHE[app_id]
-
-    name = desktop_name_for_app_id(app_id, dirs)
-    # Hanya hasil positif yang di-cache: berkas .desktop bisa baru muncul
-    # setelah PWA selesai dipasang.
-    if name:
-        _CACHE[app_id] = name
-    return name
+    return desktop_name_for_app_id(app_id, dirs)
 
 
 def clear_cache() -> None:
-    """Lupakan hasil sebelumnya (dipakai tes dan setelah daftar PWA berubah)."""
-    _CACHE.clear()
+    """Lupakan hasil sebelumnya (dipakai tes dan tombol muat ulang)."""
+    global _BRIDGE_OK
+    _BRIDGE_OK = None

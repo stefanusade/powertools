@@ -35,6 +35,7 @@ from gi.repository import Gdk, Gio, GLib, Gtk
 
 from . import config, ui
 from .discord import valid_app_id
+from .dbusutil import bridge_windows_available
 from .mpris import list_sources
 from .sources import (
     APP_PRESETS,
@@ -577,6 +578,16 @@ class SettingsWindow(Gtk.ApplicationWindow):
         hint.add_css_class("pt-faint")
         box.append(hint)
 
+        self._discord_pwa_hint = Gtk.Label(
+            label="Deteksi aplikasi web (PWA) belum aktif: ekstensi GNOME "
+                  "yang berjalan belum punya metode daftar jendela. Jalankan "
+                  "install.sh lalu logout dan login lagi. Sementara itu "
+                  "sumber browser tampil sebagai nama browser, bukan PWA.",
+            xalign=0, wrap=True)
+        self._discord_pwa_hint.add_css_class("pt-warn")
+        self._discord_pwa_hint.set_visible(False)
+        box.append(self._discord_pwa_hint)
+
         self._discord_sources_box = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL, spacing=2)
         box.append(self._discord_sources_box)
@@ -662,12 +673,21 @@ class SettingsWindow(Gtk.ApplicationWindow):
             found = list_sources()
         except Exception:
             found = []
-        GLib.idle_add(self._apply_discord_detected, found)
+        try:
+            windows_ok = bridge_windows_available()
+        except Exception:
+            windows_ok = False
+        GLib.idle_add(self._apply_discord_detected, found, windows_ok)
 
-    def _apply_discord_detected(self, found: list) -> bool:
+    def _apply_discord_detected(self, found: list, windows_ok: bool = True) -> bool:
         self._discord_scan_pending = False
         self._discord_detected = list(found)
         self._discord_detected_loaded = True
+        hint = getattr(self, "_discord_pwa_hint", None)
+        if hint is not None:
+            # Ekstensi GNOME menyimpan kode selama sesi berjalan, jadi metode
+            # daftar jendela baru tersedia setelah login ulang.
+            hint.set_visible(not windows_ok)
         try:
             self._rebuild_discord_sources()
         except Exception:
