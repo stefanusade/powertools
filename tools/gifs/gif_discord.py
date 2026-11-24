@@ -29,6 +29,8 @@ WIDTH, HEIGHT = 860, 760
 SOURCES = [
     mpris.SourceInfo("spotify", "Lampu Kota", "Senja Kecil", True,
                      "org.mpris.MediaPlayer2.spotify"),
+    mpris.SourceInfo("youtube", "Konser Malam", "Senja Kecil", True,
+                     "org.mpris.MediaPlayer2.chromium"),
     mpris.SourceInfo("youtube-music", "Peron", "Senja Kecil", False,
                      "org.mpris.MediaPlayer2.chromium"),
     mpris.SourceInfo("vlc", "Rekaman Konser", "", True,
@@ -42,7 +44,7 @@ def on_activate(application):
     ui.install_css()
     cfg = config.Config()
     cfg.set("modules.discord", True)
-    cfg.set("discord.app_ids", {"spotify": "1573948090166288504"})
+    cfg.set("discord.app_ids", {})
     cfg.save()
 
     window = SettingsWindow(application, cfg)
@@ -69,16 +71,19 @@ def on_activate(application):
 
         return run
 
-    # Spotify → "YouTube Music" (0=Otomatis, 1=PowerTools, 2=YouTube Music)
-    scene.at(3.0, pick("spotify", 2))
+    # Spotify → "Spotify" (0=Otomatis, 1=PowerTools, 2=YouTube Music,
+    # 3=Spotify, 4=Netflix, 5=YouTube)
+    scene.at(3.0, pick("spotify", 3))
+    # YouTube → "YouTube": kata kerjanya jadi "Watching".
+    scene.at(4.4, pick("youtube", 5))
     # VLC → preset umum
-    scene.at(4.4, pick("vlc", 1))
+    scene.at(5.8, pick("vlc", 1))
     # "Sumber lain" → tidak dikirim ke Discord
-    scene.at(5.8, pick("default", 1))
+    scene.at(7.0, pick("default", 1))
     # Kembali ke Otomatis supaya terlihat pilihannya bisa diganti lagi.
-    scene.at(7.0, pick("spotify", 0))
-    scene.at(8.2, lambda: window._select_page("general"))
-    scene.at(9.0, lambda: window._select_page("discord"))
+    scene.at(8.2, pick("spotify", 0))
+    scene.at(8.6, lambda: window._select_page("general"))
+    scene.at(9.2, lambda: window._select_page("discord"))
 
     def done():
         gif = encode_gif(OUT, GIF, fps=10, width=680, colors=128)

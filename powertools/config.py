@@ -96,7 +96,7 @@ DEFAULTS: dict[str, Any] = {
         # Pemetaan sumber → Application ID. GUI hanya menawarkan Application ID
         # preset (lihat `sources.APP_PRESETS`), jadi isinya selalu salah satu ID
         # paten — bukan teks bebas. Kunci = nama sumber (lihat `powertools
-        # doctor`), mis. {"spotify": "1573948090166288504"}. Kunci `default`
+        # doctor`), mis. {"spotify": "1574690633262567494"}. Kunci `default`
         # dipakai untuk sumber yang tidak punya pemetaan sendiri.
         "app_ids": {},
         # Pakai preset bawaan PowerTools untuk sumber yang tidak dipetakan di
