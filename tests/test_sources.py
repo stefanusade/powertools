@@ -79,6 +79,61 @@ class SourceKeyTests(unittest.TestCase):
         self.assertEqual(
             source_key("org.mpris.MediaPlayer2.My_Player (Beta)"), "my-player-beta")
 
+    def test_pwa_memakai_nama_aplikasinya(self):
+        owner = "org.mpris.MediaPlayer2.brave.instance10804"
+        self.assertEqual(
+            source_key(owner, "Lagu", app_name="YouTube Music"),
+            "youtube-music",
+        )
+        self.assertEqual(
+            source_key(owner, "Film", app_name="Netflix"), "netflix")
+
+    def test_pwa_tak_dikenal_punya_kunci_sendiri(self):
+        # Aplikasi web lain tetap terpisah dari tab browser biasa.
+        self.assertEqual(
+            source_key(
+                "org.mpris.MediaPlayer2.chrome.instance7",
+                "Catatan",
+                app_name="Notion",
+            ),
+            "notion",
+        )
+
+    def test_nama_pwa_menang_atas_judul(self):
+        self.assertEqual(
+            source_key(
+                "org.mpris.MediaPlayer2.brave.instance1",
+                "Video - YouTube",
+                app_name="YouTube Music",
+            ),
+            "youtube-music",
+        )
+
+    def test_url_menentukan_situs(self):
+        owner = "org.mpris.MediaPlayer2.firefox.instance9"
+        self.assertEqual(
+            source_key(owner, "Lagu", url="https://music.youtube.com/watch?v=1"),
+            "youtube-music",
+        )
+        self.assertEqual(
+            source_key(owner, "Video", url="https://www.youtube.com/watch?v=1"),
+            "youtube",
+        )
+        self.assertEqual(
+            source_key(owner, "Film", url="https://www.netflix.com/watch/1"),
+            "netflix",
+        )
+
+    def test_url_tidak_mengubah_pemutar_biasa(self):
+        self.assertEqual(
+            source_key(
+                "org.mpris.MediaPlayer2.spotify",
+                "Lagu",
+                url="https://open.spotify.com/track/1",
+            ),
+            "spotify",
+        )
+
 
 class BuiltinAppIdTests(unittest.TestCase):
     def test_semua_id_bawaan_valid(self):

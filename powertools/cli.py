@@ -196,6 +196,7 @@ def _detected_source() -> tuple[str, str, str] | None:
         from .dbusutil import session_bus
         from .mpris import BUS_PREFIX, OBJECT_PATH
         from .sources import source_key
+        from .webapps import app_name_for_owner
     except Exception:
         return None
 
@@ -251,8 +252,16 @@ def _detected_source() -> tuple[str, str, str] | None:
         if not title:
             continue
         album = str(metadata.get("xesam:album") or "").strip()
+        url = str(metadata.get("xesam:url") or "").strip()
         art = str(metadata.get("mpris:artUrl") or "").strip()
-        return source_key(owner, title, album), title, art
+        source = source_key(
+            owner,
+            title,
+            album,
+            app_name=app_name_for_owner(owner),
+            url=url,
+        )
+        return source, title, art
     return None
 
 

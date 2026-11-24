@@ -38,11 +38,11 @@ from .discord import valid_app_id
 from .mpris import list_sources
 from .sources import (
     APP_PRESETS,
-    KNOWN_SOURCES,
     PRESETS,
     preset_for_app_id,
     source_label,
 )
+from .webapps import clear_cache as clear_webapp_cache
 
 SCHEMA = "org.gnome.shell.extensions.powertools"
 
@@ -166,7 +166,6 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self._discord_detected: list = []
         self._discord_detected_loaded = False
         self._discord_scan_pending = False
-        self._discord_source_options: list[tuple[str, str]] = []
         self._discord_dropdowns: dict[str, Gtk.DropDown] = {}
 
         self.set_title("PowerTools Pengaturan")
@@ -354,9 +353,11 @@ class SettingsWindow(Gtk.ApplicationWindow):
     def _on_page_shown(self, page: str) -> None:
         """Muat data yang hanya relevan saat tabnya dibuka."""
         if page == "discord":
-            # Daftar aplikasi terbuka dipindai di background supaya jendela
-            # Pengaturan tidak menunggu D-Bus saat dibuka.
-            self._refresh_discord_detected()
+            # Daftar aplikasi terbuka dipindai ulang setiap tab dibuka, supaya
+            # barisnya selalu cocok dengan pemutar yang benar-benar hidup.
+            # Pemindaian berjalan di background agar jendela tidak menunggu
+            # D-Bus.
+            self._refresh_discord_detected(force=True)
             self._rebuild_discord_sources()
 
     def _select_page(self, page: str) -> None:
@@ -569,8 +570,9 @@ class SettingsWindow(Gtk.ApplicationWindow):
             label="Kata kerjanya mengikuti sumber: musik memakai "
                   "\"Listening to\", YouTube dan Netflix memakai "
                   "\"Watching\". Judul setelahnya mengikuti nama aplikasi "
-                  "preset, bukan nama pemutar. Pilihan tersimpan dan tetap "
-                  "berlaku setelah PowerTools dimulai ulang.",
+                  "preset, bukan nama pemutar. Daftar di bawah diambil dari "
+                  "pemutar MPRIS yang benar-benar terbuka — tidak ada daftar "
+                  "bawaan yang ditampilkan tanpa aplikasinya.",
             xalign=0, wrap=True)
         hint.add_css_class("pt-faint")
         box.append(hint)
@@ -578,28 +580,6 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self._discord_sources_box = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL, spacing=2)
         box.append(self._discord_sources_box)
-
-        add_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        add_row.set_margin_top(6)
-        self._discord_source_choice = Gtk.DropDown()
-        self._discord_source_choice.add_css_class("pt-drop")
-        self._discord_source_choice.set_hexpand(True)
-        self._discord_source_choice.set_tooltip_text(
-            "Sumber yang sedang terbuka muncul di sini. Pilih satu, lalu "
-            "tentukan judul activity yang dipakai.")
-        add_row.append(self._discord_source_choice)
-
-        self._discord_preset_choice = Gtk.DropDown.new_from_strings(
-            [preset["label"] for preset in APP_PRESETS])
-        self._discord_preset_choice.add_css_class("pt-drop")
-        self._discord_preset_choice.set_size_request(170, -1)
-        add_row.append(self._discord_preset_choice)
-
-        self._discord_add_button = Gtk.Button(label="Tambah")
-        self._discord_add_button.connect(
-            "clicked", self._on_discord_source_add)
-        add_row.append(self._discord_add_button)
-        box.append(add_row)
 
         tools = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         tools.set_margin_top(4)
@@ -719,8 +699,9 @@ class SettingsWindow(Gtk.ApplicationWindow):
         try:
             if not sources:
                 empty = Gtk.Label(
-                    label="Belum ada pemutar terdeteksi. Buka pemutar musik "
-                          "lalu tekan \"Muat ulang daftar aplikasi\".",
+                    label="Belum ada pemutar MPRIS yang terbuka. Putar "
+                          "sesuatu di pemutar musik atau browser, lalu tekan "
+                          "\"Muat ulang daftar aplikasi\".",
                     xalign=0, wrap=True)
                 empty.add_css_class("pt-faint")
                 box.append(empty)
@@ -734,7 +715,6 @@ class SettingsWindow(Gtk.ApplicationWindow):
         finally:
             self._loading = previous
 
-        self._refresh_discord_add_choices(sources)
         if hasattr(self, "_discord_detected_label"):
             count = len(self._discord_detected)
             self._discord_detected_label.set_label(
@@ -914,33 +894,6 @@ class SettingsWindow(Gtk.ApplicationWindow):
         row.append(clear)
         return row
 
-    def _refresh_discord_add_choices(self, existing: list[str]) -> None:
-        """Isi dropdown "Tambah" dengan sumber yang belum punya baris.
-
-        Sumber yang sedang terbuka sudah otomatis punya baris sendiri, jadi
-        yang tersisa di sini adalah pemutar yang sedang tidak jalan.
-        """
-        choice = getattr(self, "_discord_source_choice", None)
-        if choice is None:
-            return
-
-        seen = set(existing)
-        options: list[tuple[str, str]] = []
-        for key in KNOWN_SOURCES:
-            if key in seen:
-                continue
-            seen.add(key)
-            options.append((key, source_label(key)))
-
-        self._discord_source_options = options
-        labels = [label for _key, label in options]
-        if not labels:
-            labels = ["Semua sumber sudah terdaftar"]
-        choice.set_model(Gtk.StringList.new(labels))
-        choice.set_sensitive(bool(options))
-        if hasattr(self, "_discord_add_button"):
-            self._discord_add_button.set_sensitive(bool(options))
-
     def _on_discord_source_preset(self, dropdown: Gtk.DropDown, _pspec,
                                   source: str, keys: list[str]) -> None:
         if self._loading:
@@ -953,23 +906,14 @@ class SettingsWindow(Gtk.ApplicationWindow):
             return
         self._store_discord_preset(source, key)
 
-    def _on_discord_source_add(self, _button: Gtk.Button) -> None:
-        index = int(self._discord_source_choice.get_selected())
-        if index < 0 or index >= len(self._discord_source_options):
-            return
-        source = self._discord_source_options[index][0]
-        preset_index = int(self._discord_preset_choice.get_selected())
-        if preset_index < 0 or preset_index >= len(APP_PRESETS):
-            return
-        self._store_discord_preset(source, APP_PRESETS[preset_index]["key"])
-        self._rebuild_discord_sources()
-
     def _on_discord_source_remove(self, _button: Gtk.Button,
                                   source: str) -> None:
         self._store_discord_preset(source, "")
         self._rebuild_discord_sources()
 
     def _on_discord_refresh(self, _button: Gtk.Button) -> None:
+        # PWA bisa baru dipasang/dihapus sejak pemindaian terakhir.
+        clear_webapp_cache()
         self._refresh_discord_detected(force=True)
 
     def _on_discord_legacy_clear(self, _button: Gtk.Button) -> None:

@@ -16,6 +16,7 @@ from gi.repository import Gio, GLib
 
 from .dbusutil import session_bus
 from .sources import source_key
+from .webapps import app_name_for_owner
 
 BUS_PREFIX = "org.mpris.MediaPlayer2"
 PLAYER_IFACE = "org.mpris.MediaPlayer2.Player"
@@ -110,7 +111,12 @@ def list_sources() -> list[SourceInfo]:
         if metadata is None:
             continue
         source = source_key(
-            name, metadata["title"], metadata["album"])
+            name,
+            metadata["title"],
+            metadata["album"],
+            app_name=app_name_for_owner(name),
+            url=metadata.get("url", ""),
+        )
         info = SourceInfo(
             source=source,
             title=metadata["title"],
@@ -181,6 +187,7 @@ def _parse_metadata(data: dict | None) -> dict | None:
         artist = ", ".join(str(item) for item in artist if item)
     artist = str(artist or "").strip()
     album = str(data.get("xesam:album") or "").strip()
+    url = str(data.get("xesam:url") or "").strip()
     art_url = str(data.get("mpris:artUrl") or "").strip()
     track_id = str(data.get("mpris:trackid") or "")
     try:
@@ -197,6 +204,7 @@ def _parse_metadata(data: dict | None) -> dict | None:
         "length_us": length_us,
         "track_id": track_id,
         "art_url": art_url,
+        "url": url,
     }
 
 
@@ -534,6 +542,8 @@ class MprisWatcher:
                         active.owner,
                         str(metadata.get("title") or ""),
                         str(metadata.get("album") or ""),
+                        app_name=app_name_for_owner(active.owner),
+                        url=str(metadata.get("url") or ""),
                     ),
                 )
                 self._on_track(self._current_track)

@@ -53,6 +53,22 @@ SITE_HINTS = (
     ("twitch", "twitch"),
 )
 
+# Petunjuk dari ``xesam:url``. Hanya sebagian pemutar yang mengirim URL; kalau
+# ada, ini lebih tepat daripada menebak dari judul.
+URL_HINTS = (
+    ("music.youtube.com", "youtube-music"),
+    ("youtu.be", "youtube"),
+    ("youtube.com", "youtube"),
+    ("open.spotify.com", "spotify"),
+    ("spotify.com", "spotify"),
+    ("netflix.com", "netflix"),
+    ("soundcloud.com", "soundcloud"),
+    ("bandcamp.com", "bandcamp"),
+    ("deezer.com", "deezer"),
+    ("tidal.com", "tidal"),
+    ("twitch.tv", "twitch"),
+)
+
 # Preset Application ID bawaan. Discord mengunci kata kerja ("Listening to"
 # atau "Watching") beserta nama aplikasi, jadi satu platform butuh satu
 # aplikasi Discord. Semua ID di sini paten dan disediakan PowerTools: pengguna
@@ -167,7 +183,6 @@ SOURCE_LABELS = {
     "librewolf": "LibreWolf",
     "waterfox": "Waterfox",
 }
-KNOWN_SOURCES = tuple(SOURCE_LABELS)
 
 
 def source_label(source: str) -> str:
@@ -235,12 +250,40 @@ def resolve_app_id(
     return ""
 
 
-def source_key(owner: str, title: str = "", album: str = "") -> str:
+def slug_source(text: object) -> str:
+    """Kunci sumber dari nama bebas: ``YouTube Music`` → ``youtube-music``."""
+    return re.sub(r"[^a-z0-9]+", "-", str(text or "").lower()).strip("-")
+
+
+def _hinted_source(text: object) -> str:
+    lowered = str(text or "").lower()
+    if not lowered:
+        return ""
+    for needle, mapped in SITE_HINTS:
+        if needle in lowered:
+            return mapped
+    return ""
+
+
+def source_key(
+    owner: str,
+    title: str = "",
+    album: str = "",
+    *,
+    app_name: str = "",
+    url: str = "",
+) -> str:
     """Kunci sumber yang stabil untuk pemilihan Application ID Discord.
 
     Contoh: ``org.mpris.MediaPlayer2.brave.instance282140`` → ``brave``.
-    Untuk browser, judul/album dipakai kalau menyebut layanan tertentu
-    (mis. ``… - YouTube Music`` → ``youtube-music``).
+
+    Untuk browser, kunci bisa lebih spesifik, berurutan:
+
+    1. ``app_name`` — PWA yang dipasang (mis. YouTube Music) punya proses dan
+       pemutar MPRIS sendiri; namanya diambil dari berkas .desktop.
+    2. ``url`` — kalau pemutar mengirim ``xesam:url``.
+    3. judul/album — sebagian situs menyertakan namanya di metadata.
+    4. nama browser itu sendiri.
     """
     name = str(owner or "").strip()
     prefix = "org.mpris.MediaPlayer2."
@@ -248,11 +291,22 @@ def source_key(owner: str, title: str = "", album: str = "") -> str:
         name = name[len(prefix):]
     # Buang suffix instance: "brave.instance282140" → "brave".
     name = name.split(".")[0]
-    key = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    key = slug_source(name)
 
     if key in BROWSER_SOURCES:
-        text = f"{title} {album}".lower()
-        for needle, mapped in SITE_HINTS:
-            if needle in text:
+        hinted = _hinted_source(app_name)
+        if hinted:
+            return hinted
+        lowered_url = str(url or "").lower()
+        for needle, mapped in URL_HINTS:
+            if needle in lowered_url:
                 return mapped
+        hinted = _hinted_source(f"{title} {album}")
+        if hinted:
+            return hinted
+        # PWA yang bukan layanan yang dikenal tetap dapat kunci sendiri, supaya
+        # tidak bercampur dengan tab browser biasa.
+        slug = slug_source(app_name)
+        if slug:
+            return slug
     return key

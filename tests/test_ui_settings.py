@@ -146,33 +146,28 @@ class DiscordPresetTests(unittest.TestCase):
         window, _cfg, _path = self._window()
         self.assertIn("brave", window._discord_dropdowns)
 
-    def test_dropdown_tambah_tidak_mengulang_sumber_terdaftar(self):
-        window, _cfg, _path = self._window()
-        sources = [key for key, _label in window._discord_source_options]
-        self.assertNotIn("brave", sources)
-        self.assertIn("spotify", sources)
-
-    def test_label_dropdown_memakai_nama_kenal(self):
-        window, _cfg, _path = self._window()
-        labels = dict(window._discord_source_options)
-        self.assertEqual(labels["spotify"], "Spotify")
-        self.assertEqual(labels["youtube-music"], "YouTube Music")
+    def test_daftar_hanya_berisi_sumber_nyata(self):
+        """Tidak ada daftar pemutar bawaan: hanya MPRIS + pemetaan tersimpan."""
+        window, _cfg, _path = self._window(
+            discord__app_ids={"vlc": PRESETS["default"]["app_id"]})
+        self.assertEqual(
+            set(window._discord_dropdowns), {"brave", "vlc", "default"})
+        self.assertNotIn("spotify", window._discord_dropdowns)
+        self.assertNotIn("netflix", window._discord_dropdowns)
 
     def test_pilihan_preset_menulis_id_paten(self):
         window, cfg, path = self._window()
-        source = window._discord_source_options[0][0]
-        window._discord_source_choice.set_selected(0)
-        window._discord_preset_choice.set_selected(1)  # YouTube Music
-        window._on_discord_source_add(None)
+        dropdown = window._discord_dropdowns["brave"]
+        dropdown.set_selected(2)  # YouTube Music
         window._flush()
 
         self.assertEqual(
-            cfg.get("discord.app_ids")[source],
+            cfg.get("discord.app_ids")["brave"],
             PRESETS["youtube-music"]["app_id"],
         )
         tersimpan = json.loads(path.read_text(encoding="utf-8"))
         self.assertEqual(
-            tersimpan["discord"]["app_ids"][source],
+            tersimpan["discord"]["app_ids"]["brave"],
             PRESETS["youtube-music"]["app_id"],
         )
 
@@ -216,10 +211,7 @@ class DiscordPresetTests(unittest.TestCase):
 
     def test_pengaturan_bertahan_setelah_dibuka_ulang(self):
         window, cfg, path = self._window()
-        source = window._discord_source_options[0][0]
-        window._discord_source_choice.set_selected(0)
-        window._discord_preset_choice.set_selected(1)
-        window._on_discord_source_add(None)
+        window._discord_dropdowns["brave"].set_selected(2)  # YouTube Music
         window._flush()
         window.destroy()
 
@@ -231,7 +223,7 @@ class DiscordPresetTests(unittest.TestCase):
         window2._discord_detected_loaded = True
         self.addCleanup(window2.destroy)
 
-        dropdown = window2._discord_dropdowns[source]
+        dropdown = window2._discord_dropdowns["brave"]
         model = dropdown.get_model()
         self.assertEqual(
             model.get_string(int(dropdown.get_selected())),
