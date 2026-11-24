@@ -16,6 +16,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from powertools.discord import (
+    ACTIVITY_TYPE_LISTENING,
+    ACTIVITY_TYPE_WATCHING,
     RATE_LIMIT,
     RATE_WINDOW,
     DiscordPresence,
@@ -68,7 +70,7 @@ class ActivityTests(unittest.TestCase):
             playing=True,
         )
         self.assertIsNotNone(activity)
-        self.assertEqual(activity["type"], 2)
+        self.assertEqual(activity["type"], ACTIVITY_TYPE_LISTENING)
         self.assertEqual(activity["details"], "Lagu")
         self.assertEqual(activity["state"], "Artis")
         self.assertEqual(activity["assets"]["large_image"],
@@ -94,6 +96,21 @@ class ActivityTests(unittest.TestCase):
 
     def test_tanpa_judul_tidak_ada_activity(self):
         self.assertIsNone(build_activity(title="   ", playing=True))
+
+    def test_tipe_watching_untuk_video(self):
+        activity = build_activity(
+            title="Video",
+            artist="Kanal",
+            playing=True,
+            activity_type=ACTIVITY_TYPE_WATCHING,
+        )
+        self.assertEqual(activity["type"], ACTIVITY_TYPE_WATCHING)
+
+    def test_tipe_tidak_dikenal_kembali_ke_listening(self):
+        for value in (None, "", "x", 0, 99, -1):
+            activity = build_activity(
+                title="Lagu", playing=True, activity_type=value)
+            self.assertEqual(activity["type"], ACTIVITY_TYPE_LISTENING)
 
     def test_cover_non_http_dilewati(self):
         for url in ("file:///tmp/a.png", "data:image/png;base64,abc"):

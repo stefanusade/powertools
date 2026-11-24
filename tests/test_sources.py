@@ -8,11 +8,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from powertools.discord import valid_app_id
+from powertools.discord import (
+    ACTIVITY_TYPE_LISTENING,
+    ACTIVITY_TYPE_WATCHING,
+    valid_app_id,
+)
 from powertools.sources import (
     APP_PRESETS,
     BUILTIN_APP_IDS,
     PRESETS,
+    activity_type_for,
     preset_for_app_id,
     resolve_app_id,
     source_key,
@@ -145,8 +150,8 @@ class BuiltinAppIdTests(unittest.TestCase):
     def test_id_tidak_valid_diabaikan(self):
         self.assertEqual(
             resolve_app_id(
-                "spotify",
-                app_ids={"spotify": "bukan-angka"},
+                "vlc",
+                app_ids={"vlc": "bukan-angka"},
                 app_id="333333333333333333",
             ),
             "333333333333333333",
@@ -197,6 +202,26 @@ class PresetTests(unittest.TestCase):
         self.assertIn("default", PRESETS)
         self.assertEqual(PRESETS["default"]["label"], "PowerTools (umum)")
 
+    def test_preset_platform_baru(self):
+        self.assertEqual(
+            BUILTIN_APP_IDS["spotify"], "1574690633262567494")
+        self.assertEqual(
+            BUILTIN_APP_IDS["netflix"], "1574693531161731112")
+        self.assertEqual(
+            BUILTIN_APP_IDS["youtube"], "1574695288088559706")
+        self.assertEqual(
+            resolve_app_id("spotify"), BUILTIN_APP_IDS["spotify"])
+        self.assertEqual(
+            resolve_app_id("netflix"), BUILTIN_APP_IDS["netflix"])
+        self.assertEqual(
+            resolve_app_id("youtube"), BUILTIN_APP_IDS["youtube"])
+
+    def test_preset_platform_baru_bisa_dilacak_balik(self):
+        for key in ("spotify", "netflix", "youtube"):
+            found = preset_for_app_id(BUILTIN_APP_IDS[key])
+            self.assertIsNotNone(found)
+            self.assertEqual(found["key"], key)
+
     def test_label_sumber_dikenal(self):
         self.assertEqual(source_label("youtube-music"), "YouTube Music")
         self.assertEqual(source_label("spotify"), "Spotify")
@@ -204,6 +229,58 @@ class PresetTests(unittest.TestCase):
     def test_label_sumber_asing_dibentuk_dari_kunci(self):
         self.assertEqual(source_label("my-player"), "My Player")
         self.assertEqual(source_label(""), "Tidak dikenal")
+
+
+class ActivityTypeTests(unittest.TestCase):
+    """YouTube/Netflix memakai Watching, sumber musik tetap Listening to."""
+
+    def test_video_memakai_watching(self):
+        self.assertEqual(
+            activity_type_for("youtube"), ACTIVITY_TYPE_WATCHING)
+        self.assertEqual(
+            activity_type_for("netflix"), ACTIVITY_TYPE_WATCHING)
+        self.assertEqual(
+            activity_type_for(" Netflix "), ACTIVITY_TYPE_WATCHING)
+
+    def test_musik_memakai_listening(self):
+        for source in ("spotify", "youtube-music", "vlc", "mpv", "brave"):
+            self.assertEqual(
+                activity_type_for(source), ACTIVITY_TYPE_LISTENING, source)
+
+    def test_sumber_kosong_atau_asing_memakai_listening(self):
+        for source in ("", None, "pemutar-aneh"):
+            self.assertEqual(
+                activity_type_for(source), ACTIVITY_TYPE_LISTENING)
+
+    def test_preset_platform_menentukan_kata_kerja(self):
+        # Browser yang dipetakan ke preset YouTube harus "Watching" walau
+        # sumbernya bukan "youtube".
+        self.assertEqual(
+            activity_type_for("brave", BUILTIN_APP_IDS["youtube"]),
+            ACTIVITY_TYPE_WATCHING,
+        )
+        self.assertEqual(
+            activity_type_for("brave", BUILTIN_APP_IDS["netflix"]),
+            ACTIVITY_TYPE_WATCHING,
+        )
+        self.assertEqual(
+            activity_type_for("youtube", BUILTIN_APP_IDS["spotify"]),
+            ACTIVITY_TYPE_LISTENING,
+        )
+
+    def test_preset_umum_mengikuti_jenis_sumber(self):
+        self.assertEqual(
+            activity_type_for("youtube", BUILTIN_APP_IDS["default"]),
+            ACTIVITY_TYPE_WATCHING,
+        )
+        self.assertEqual(
+            activity_type_for("spotify", BUILTIN_APP_IDS["default"]),
+            ACTIVITY_TYPE_LISTENING,
+        )
+        self.assertEqual(
+            activity_type_for("netflix", "123456789012345678"),
+            ACTIVITY_TYPE_WATCHING,
+        )
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-"""Discord Rich Presence "Listening to" lewat IPC lokal.
+"""Discord Rich Presence "Listening to"/"Watching" lewat IPC lokal.
 
 Discord desktop — termasuk versi Flatpak dan Snap — membuka Unix socket
 ``discord-ipc-N``. Protokolnya sederhana: header 8 byte (opcode + panjang
@@ -8,8 +8,8 @@ tidak mengirim apa pun ke internet, dan tidak butuh token/bot.
 Discord tetap mewajibkan **Application ID** untuk handshake. ID itu tidak
 diminta dari pengguna: PowerTools membawa beberapa preset di ``sources.py``
 (milik proyek ini), dan Pengaturan hanya memilih preset mana yang dipakai untuk
-tiap sumber. Nama aplikasi preset itulah yang tampil sebagai
-"Listening to ...".
+tiap sumber. Nama aplikasi preset itulah yang tampil setelah kata kerja
+aktivitasnya: "Listening to ..." untuk musik, "Watching ..." untuk video.
 """
 
 from __future__ import annotations
@@ -34,6 +34,8 @@ OP_PONG = 4
 
 MAX_FRAME = 1 << 20
 ACTIVITY_TYPE_LISTENING = 2
+ACTIVITY_TYPE_WATCHING = 3
+ACTIVITY_TYPES = frozenset({ACTIVITY_TYPE_LISTENING, ACTIVITY_TYPE_WATCHING})
 
 # Discord membatasi SET_ACTIVITY sekitar 5 permintaan per 20 detik. Pakai
 # token bucket supaya burst singkat (ganti lagu beruntun) tetap wajar tanpa
@@ -139,8 +141,9 @@ def build_activity(
     show_paused: bool = False,
     show_album_art: bool = True,
     fallback_asset: object = "",
+    activity_type: object = ACTIVITY_TYPE_LISTENING,
 ) -> dict[str, Any] | None:
-    """Susun objek activity Discord (type 2 = Listening to).
+    """Susun objek activity Discord (2 = Listening to, 3 = Watching).
 
     Mengembalikan None kalau tidak ada yang perlu ditampilkan. Timestamp
     memakai posisi saat ini supaya progress bar Discord langsung tepat.
@@ -150,6 +153,13 @@ def build_activity(
         return None
     if not playing and not show_paused:
         return None
+
+    try:
+        kind = int(activity_type)
+    except (TypeError, ValueError):
+        kind = ACTIVITY_TYPE_LISTENING
+    if kind not in ACTIVITY_TYPES:
+        kind = ACTIVITY_TYPE_LISTENING
 
     clean_artist = _clip(artist)
     clean_album = _clip(album)
@@ -163,7 +173,7 @@ def build_activity(
         state_parts.append("Dijeda")
 
     activity: dict[str, Any] = {
-        "type": ACTIVITY_TYPE_LISTENING,
+        "type": kind,
         "details": clean_title,
         "instance": False,
     }

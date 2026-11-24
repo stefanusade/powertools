@@ -100,7 +100,7 @@ DEFAULTS: dict[str, Any] = {
         # dipakai untuk sumber yang tidak punya pemetaan sendiri.
         "app_ids": {},
         # Pakai preset bawaan PowerTools untuk sumber yang tidak dipetakan di
-        # atas, supaya judul "Listening to ..." sudah menyebut sumber tanpa
+        # atas, supaya judul activity sudah menyebut sumber tanpa
         # perlu membuat aplikasi Discord sendiri. Diatur lewat dropdown baris
         # "Sumber lain" di Pengaturan. Matikan kalau ingin tidak mengirim
         # status untuk sumber yang tidak dipetakan.

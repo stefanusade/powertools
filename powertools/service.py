@@ -20,7 +20,7 @@ from .color import ColorPicker
 from .dbusutil import session_bus
 from .discord import DiscordPresence, build_activity, valid_app_id
 from .mpris import MprisWatcher
-from .sources import resolve_app_id
+from .sources import activity_type_for, resolve_app_id
 from .store import ClipStore
 from .ui_clipboard import ClipboardWindow
 from .ui_color import ColorResultWindow
@@ -674,9 +674,9 @@ class PowerToolsApp(Gtk.Application):
         show_art = bool(self.cfg.get("discord.show_album_art", True))
         fallback_asset = str(self.cfg.get("discord.fallback_asset", "") or "")
 
-        # Berganti sumber (mis. Spotify → VLC) berarti berganti Application
-        # ID, karena Discord memakai nama aplikasi sebagai judul "Listening
-        # to ...". Handshake harus diulang; set_app_id menangani itu.
+        # Berganti sumber (mis. Spotify → VLC) bisa berarti berganti
+        # Application ID, karena Discord memakai nama aplikasi sebagai judul
+        # activity. Handshake harus diulang; set_app_id menangani itu.
         desired_app = self._discord_app_id_for(track)
         if not desired_app:
             # Sumber ini sengaja tidak dikirim (preset dimatikan dan tidak ada
@@ -699,7 +699,13 @@ class PowerToolsApp(Gtk.Application):
                 self._discord.clear()
             return
 
-        identity = (track.key, playing)
+        source = str(getattr(track, "source", "") or "")
+        activity_type = activity_type_for(source, desired_app)
+
+        # Sumber ikut masuk identity: dua pemutar bisa melaporkan lagu yang
+        # sama persis, tetapi kata kerja activity-nya berbeda (YouTube
+        # "Watching" vs Spotify "Listening to").
+        identity = (track.key, playing, source, activity_type)
         now = time.monotonic()
         if not force and identity == self._discord_identity:
             # Discord menggerakkan progress sendiri dari timestamp; update
@@ -722,6 +728,7 @@ class PowerToolsApp(Gtk.Application):
             show_paused=show_paused,
             show_album_art=show_art,
             fallback_asset=fallback_asset,
+            activity_type=activity_type,
         )
         if activity is None:
             if self._discord_identity is not None:

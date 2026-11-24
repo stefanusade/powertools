@@ -12,7 +12,7 @@ bukan sekadar disembunyikan:
   * media      → dynamic island tidak dibuat sama sekali (tanpa polling
                  hover, tanpa koneksi MPRIS).
   * lyrics     → pemantau MPRIS berhenti dan jendela lirik ditutup.
-  * discord    → koneksi IPC ditutup dan status Listening to dihapus.
+  * discord    → koneksi IPC ditutup dan status Listening to/Watching dihapus.
 
 Kalau semua modul dimatikan, proses background tidak lagi ditahan
 sehingga RAM yang dipakai PowerTools kembali ke nol.
@@ -85,9 +85,10 @@ MODULE_INFO = {
     "discord": (
         "audio-headphones-symbolic",
         "Opsional",
-        "Tampilkan lagu yang sedang diputar sebagai status Listening to di Discord.",
-        "Mematikan: koneksi IPC ke Discord ditutup dan status Listening to "
-        "langsung dihapus.",
+        "Tampilkan media yang sedang diputar sebagai status Listening to "
+        "atau Watching di Discord.",
+        "Mematikan: koneksi IPC ke Discord ditutup dan status Listening "
+        "to/Watching langsung dihapus.",
     ),
 }
 
@@ -550,7 +551,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
 
     # ------------------------------------------------------------- Discord
     def _build_discord_options(self, box: Gtk.Box) -> Gtk.Widget:
-        """Isi tab Discord: pemetaan sumber ke judul Listening to.
+        """Isi tab Discord: pemetaan sumber ke judul activity.
 
         Application ID tidak lagi diketik: semua preset paten disediakan
         PowerTools. Pengguna hanya memilih sumber mana yang memakai preset.
@@ -560,15 +561,16 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self._add_switch(box, "Tampilkan cover album",
                          "discord.show_album_art")
 
-        section = Gtk.Label(label="Judul \"Listening to ...\"", xalign=0)
+        section = Gtk.Label(label="Judul activity di Discord", xalign=0)
         section.add_css_class("pt-section")
         box.append(section)
 
         hint = Gtk.Label(
-            label="Judul di Discord mengikuti nama aplikasi preset, bukan "
-                  "nama pemutar. Pilih judul untuk tiap sumber; pilihan "
-                  "tersimpan dan tetap berlaku setelah PowerTools dimulai "
-                  "ulang.",
+            label="Kata kerjanya mengikuti sumber: musik memakai "
+                  "\"Listening to\", YouTube dan Netflix memakai "
+                  "\"Watching\". Judul setelahnya mengikuti nama aplikasi "
+                  "preset, bukan nama pemutar. Pilihan tersimpan dan tetap "
+                  "berlaku setelah PowerTools dimulai ulang.",
             xalign=0, wrap=True)
         hint.add_css_class("pt-faint")
         box.append(hint)
@@ -584,7 +586,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
         self._discord_source_choice.set_hexpand(True)
         self._discord_source_choice.set_tooltip_text(
             "Sumber yang sedang terbuka muncul di sini. Pilih satu, lalu "
-            "tentukan judul Listening to yang dipakai.")
+            "tentukan judul activity yang dipakai.")
         add_row.append(self._discord_source_choice)
 
         self._discord_preset_choice = Gtk.DropDown.new_from_strings(

@@ -12,7 +12,11 @@ from __future__ import annotations
 import re
 from typing import Mapping
 
-from .discord import valid_app_id
+from .discord import (
+    ACTIVITY_TYPE_LISTENING,
+    ACTIVITY_TYPE_WATCHING,
+    valid_app_id,
+)
 
 # Pemutar berbasis browser melaporkan dirinya sebagai browsernya, bukan situs
 # yang sedang diputar. Judul/album kadang masih membawa nama layanan web,
@@ -49,10 +53,11 @@ SITE_HINTS = (
     ("twitch", "twitch"),
 )
 
-# Preset Application ID bawaan. Discord mengunci judul "Listening to ..."
-# pada nama aplikasi, jadi satu platform butuh satu aplikasi Discord. Semua ID
-# di sini paten dan disediakan PowerTools: pengguna tidak mengetik ID, ia hanya
-# memilih sumber mana yang memakai preset ini lewat dropdown di Pengaturan.
+# Preset Application ID bawaan. Discord mengunci kata kerja ("Listening to"
+# atau "Watching") beserta nama aplikasi, jadi satu platform butuh satu
+# aplikasi Discord. Semua ID di sini paten dan disediakan PowerTools: pengguna
+# tidak mengetik ID, ia hanya memilih sumber mana yang memakai preset ini lewat
+# dropdown di Pengaturan.
 #
 # Menambah platform (mis. Spotify) cukup menambah satu entri di sini; GUI dan
 # service otomatis memakainya. Urutan entri = urutan di dropdown.
@@ -69,8 +74,57 @@ APP_PRESETS: tuple[dict[str, str], ...] = (
         "label": "YouTube Music",
         "app_id": "1573959687760646274",
     },
+    {
+        # Nama aplikasi: "Spotify - PowerTools".
+        "key": "spotify",
+        "label": "Spotify",
+        "app_id": "1574690633262567494",
+    },
+    {
+        # Nama aplikasi: "Netflix - PowerTools".
+        "key": "netflix",
+        "label": "Netflix",
+        "app_id": "1574693531161731112",
+    },
+    {
+        # Nama aplikasi: "YouTube - PowerTools".
+        "key": "youtube",
+        "label": "YouTube",
+        "app_id": "1574695288088559706",
+    },
 )
 PRESETS = {preset["key"]: preset for preset in APP_PRESETS}
+
+# Sumber video memakai aktivitas "Watching", sumber musik "Listening to".
+# Discord menulis kata kerjanya sendiri dari tipe activity; nama aplikasi
+# preset tetap yang muncul setelahnya. Preset platform menentukan kata kerja
+# lebih dulu (Brave yang dipetakan ke preset YouTube tetap "Watching"), lalu
+# preset umum mengikuti jenis sumbernya.
+WATCHING_SOURCES = frozenset({"youtube", "netflix"})
+WATCHING_PRESETS = frozenset({"youtube", "netflix"})
+LISTENING_PRESETS = frozenset({"spotify", "youtube-music"})
+
+
+def activity_type_for(source: object = "", app_id: object = "") -> int:
+    """Tipe activity Discord untuk sumber dan Application ID yang dipakai.
+
+    Preset platform menentukan kata kerjanya sendiri: YouTube dan Netflix
+    ``Watching``, Spotify dan YouTube Music ``Listening to``. Preset umum
+    (``default``) serta Application ID milik pengguna mengikuti jenis
+    sumbernya, sehingga sumber video tetap ``Watching`` walau memakai preset
+    umum.
+    """
+    preset = preset_for_app_id(app_id)
+    if preset is not None:
+        if preset["key"] in WATCHING_PRESETS:
+            return ACTIVITY_TYPE_WATCHING
+        if preset["key"] in LISTENING_PRESETS:
+            return ACTIVITY_TYPE_LISTENING
+
+    key = str(source or "").strip().lower()
+    if key in WATCHING_SOURCES:
+        return ACTIVITY_TYPE_WATCHING
+    return ACTIVITY_TYPE_LISTENING
 
 # Kompatibilitas untuk modul lama yang hanya butuh peta kunci → ID.
 BUILTIN_APP_IDS = {key: preset["app_id"] for key, preset in PRESETS.items()}
