@@ -393,7 +393,7 @@ class LyricsWindow(Gtk.ApplicationWindow):
             self._artist.set_label("Putar lagu untuk melihat lirik")
             self._clear_lines()
             self._add_placeholder("Putar lagu untuk melihat lirik.")
-            self._status.set_label("")
+            self._set_status("")
             self._spinner.stop()
             self._spinner.set_visible(False)
             self._romaji_button.set_visible(False)
@@ -422,13 +422,24 @@ class LyricsWindow(Gtk.ApplicationWindow):
         self._fetch_token += 1
         self._fetching_key = ""
         self._clear_lines()
-        self._status.set_label("Mencari lirik…")
+        self._set_status("Mencari lirik…")
         self._spinner.set_visible(True)
         self._spinner.start()
         self._romaji_button.set_visible(False)
         self._update_time()
         if self.get_visible():
             self._start_fetch()
+
+    def _set_status(self, text: str) -> None:
+        """Tulis status, dengan penanda saat pemutar sedang memutar video.
+
+        Pencarian lirik yang masih berjalan bisa selesai setelah video mulai
+        diputar; tanpa penanda ini status akan terlihat seolah video itu yang
+        sedang diberi lirik.
+        """
+        if text and self._video_playing:
+            text = f"{text} · video diputar"
+        self._status.set_label(text)
 
     def set_video(self, track) -> None:
         """Tandai bahwa yang diputar sekarang video, bukan lagu.
@@ -442,7 +453,11 @@ class LyricsWindow(Gtk.ApplicationWindow):
             return
         if self._track is not None:
             self._video_playing = True
-            self._status.set_label("Video diputar · lirik lagu terakhir ditahan")
+            self._status.set_label(
+                "Video diputar · masih mencari lirik lagu terakhir"
+                if self._spinner.get_visible()
+                else "Video diputar · lirik lagu terakhir ditahan"
+            )
             return
         self._title.set_label(getattr(track, "title", "") or "Video")
         self._artist.set_label("Video · lirik tidak tersedia")
@@ -689,7 +704,7 @@ class LyricsWindow(Gtk.ApplicationWindow):
             self._current = -1
             self._clear_lines()
             self._add_placeholder("Lirik tidak ditemukan untuk lagu ini.")
-            self._status.set_label("")
+            self._set_status("")
             self._romaji_button.set_visible(False)
             return GLib.SOURCE_REMOVE
 
@@ -712,14 +727,14 @@ class LyricsWindow(Gtk.ApplicationWindow):
 
         if result.instrumental:
             self._add_placeholder("♪  Instrumental")
-            self._status.set_label(f"Instrumental · {result.source}")
+            self._set_status(f"Instrumental · {result.source}")
         elif synced:
             self._times = [line.time for line in synced]
             for index, line in enumerate(synced):
                 label = self._add_label(line.text or "♪", "pt-lyrics-line")
                 self._attach_seek(label, index)
                 self._rows.append(label)
-            self._status.set_label(f"Lirik sinkron · {source}")
+            self._set_status(f"Lirik sinkron · {source}")
             self._update_current(
                 self._index_for(self._position), force=True, scroll=scroll
             )
@@ -734,10 +749,10 @@ class LyricsWindow(Gtk.ApplicationWindow):
                     spacer.set_size_request(-1, 8)
                     self._lines_box.append(spacer)
                     self._plain_rows.append(None)
-            self._status.set_label(f"Lirik tanpa timestamp · {source}")
+            self._set_status(f"Lirik tanpa timestamp · {source}")
         else:
             self._add_placeholder("Lirik tidak tersedia.")
-            self._status.set_label("")
+            self._set_status("")
 
     def _switch_text_mode(self, result: lyrics.Lyrics) -> None:
         """Tukar lirik asli <-> romaji tanpa mengganggu posisi baca.
@@ -756,14 +771,14 @@ class LyricsWindow(Gtk.ApplicationWindow):
                 row.set_label(line.text or "♪")
             self._current = -1
             self._update_current(self._index_for(self._position), scroll=False)
-            self._status.set_label(f"Lirik sinkron · {source}")
+            self._set_status(f"Lirik sinkron · {source}")
             return
 
         if not synced and plain and len(plain) == len(self._plain_rows):
             for row, text in zip(self._plain_rows, plain):
                 if row is not None:
                     row.set_label(text)
-            self._status.set_label(f"Lirik tanpa timestamp · {source}")
+            self._set_status(f"Lirik tanpa timestamp · {source}")
             return
 
         adjustment = self._scroller.get_vadjustment()

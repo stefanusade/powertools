@@ -350,6 +350,17 @@ class VideoTrackTests(unittest.TestCase):
         self.assertEqual(window._title.get_label(), "Lagu")
         self.assertIn("Video diputar", window._status.get_label())
 
+    def test_status_penanda_video_setelah_pencarian_selesai(self):
+        # Pencarian lirik lagu lama bisa selesai setelah video mulai diputar.
+        window = _make_window(self)
+        window.set_track(self.Track())
+        window.set_video(self.Track("Video panjang", source="youtube"))
+        window._apply_lyrics(window._fetch_token, window._track_key,
+                             lyrics.Lyrics(plain=["baris lirik"]))
+
+        self.assertIn("video diputar", window._status.get_label())
+        self.assertEqual(window._title.get_label(), "Lagu")
+
     def test_klasifikasi_video(self):
         from powertools.service import _is_video
 
