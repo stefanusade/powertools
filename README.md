@@ -218,16 +218,17 @@ Kunci sumber yang dikenali adalah nama sumber yang tampil di
 Urutan pemilihan Application ID, dari yang paling spesifik:
 
 1. `discord.app_ids.<sumber>` — preset yang dipilih di Pengaturan
-2. preset untuk sumber itu (kalau saklar preset aktif)
+2. preset untuk sumber itu (mis. `youtube`, `spotify`)
 3. `discord.app_ids.default` — cadangan eksplisit
 4. `discord.app_id` — ID lama milik Anda
 5. preset `default` (kalau saklar preset aktif)
 
 Preset per sumber sengaja berada di atas `discord.app_id` supaya tiap
 platform tetap mendapat namanya sendiri meskipun Anda sudah mengisi ID lama.
-`discord.use_builtin_ids: false` mematikan seluruh preset; setelah itu hanya
-`app_ids` dan `app_id` milik Anda yang dipakai, dan sumber yang tidak dipetakan
-tidak dikirim ke Discord.
+`discord.use_builtin_ids: false` (baris **Sumber lain → Tidak dikirim**) hanya
+mematikan **cadangan**: sumber yang punya preset sendiri tetap dikirim dengan
+preset itu, sedangkan sumber tak dikenal (mis. pemutar langka) tidak dikirim
+sama sekali.
 
 > **Penting:** Discord Developer Policy pasal 12 melarang impersonasi aplikasi
 > lain ("Do not impersonate other Applications ... or Discord services"). Jadi
@@ -256,33 +257,34 @@ dikirimnya.
 
 Karena itu sumber browser ditentukan berurutan:
 
-1. **Aplikasi web (PWA)** — kalau layanan dipasang sebagai aplikasi lewat
-   browser (mis. YouTube Music), jendelanya punya identitas sendiri:
-   `crx_<app-id>` untuk Chromium, Brave, Chrome, Edge, Vivaldi, Opera, dan
-   `FFPWA-…` untuk Firefox PWA. PowerTools meminta daftar jendela proses
-   browser ke ekstensi GNOME, lalu memilih jendela yang **judulnya memuat judul
-   lagu**. Kalau jendela itu PWA, nama aplikasinya diambil dari berkas
-   `.desktop` buatan browser (lewat `StartupWMClass`); kalau jendela itu browser
-   biasa, lagunya dari tab dan sumbernya tetap nama browser. PWA YouTube Music
-   menjadi sumber `youtube-music`, bukan `brave`, sehingga tab YouTube biasa dan
-   aplikasi YouTube Music bisa memakai judul berbeda.
+1. **Aplikasi web (PWA)** — layanan yang dipasang sebagai aplikasi punya
+   jendela dengan identitas sendiri: `crx_<app-id>` (Chromium di X11),
+   `brave-<app-id>-Default` (Brave/Chromium di Wayland), atau `FFPWA-…`
+   (Firefox PWA). PowerTools meminta daftar jendela proses browser ke ekstensi
+   GNOME, lalu memilih jendela yang **judulnya memuat judul lagu**. Bila tidak
+   ada judul yang cocok — dan ini biasa, karena jendela PWA sering hanya
+   berjudul nama aplikasinya, mis. "YouTube Music" — satu-satunya PWA di proses
+   itu dianggap sumbernya. Nama aplikasinya diambil dari berkas `.desktop`
+   buatan browser.
 2. **`xesam:url`** — sebagian pemutar mengirim URL; kalau ada, domainnya
    menentukan sumber (`music.youtube.com` → `youtube-music`, `youtube.com` →
    `youtube`, `netflix.com` → `netflix`).
-3. **Judul/album** — berhasil untuk YouTube ("… - YouTube") dan SoundCloud.
-4. **Nama browser** — sisanya menjadi `brave`, `firefox`, dan seterusnya.
+3. **Judul jendela** — MPRIS tidak menyebut situs untuk tab biasa, tetapi
+   jendela YouTube berjudul "… - YouTube". Jadi tab YouTube menjadi sumber
+   `youtube` (**Watching YouTube**), bukan `brave`.
+4. **Judul/album** — berhasil untuk SoundCloud dan sebagian situs lain.
+5. **Nama browser** — sisanya menjadi `brave`, `firefox`, dan seterusnya.
 
 Pembedaan PWA butuh **ekstensi GNOME versi terbaru** (dipasang oleh
 `install.sh`) dan baru aktif setelah **logout lalu login lagi** — GNOME Shell
 menyimpan kode ekstensi selama sesi berjalan. Selama ekstensi belum diperbarui,
-PowerTools tidak menebak: sumbernya tetap nama browser, bukan PWA yang salah.
+Pengaturan menampilkan peringatan dan PowerTools tidak menebak.
 
-Artinya: kalau Anda memutar YouTube di tab biasa **dan** YouTube Music sebagai
-PWA, keduanya adalah pemutar berbeda, tetapi Discord hanya bisa menampilkan
-**satu** activity — yaitu yang terakhir berubah. Kalau YouTube Music dibuka di
-tab biasa (bukan PWA) dan judulnya hanya nama lagu, sumbernya tetap `brave`;
-pilih baris **Brave** di Pengaturan lalu ganti presetnya ke **YouTube Music**.
-Spotify desktop, VLC, dan mpv selalu terdeteksi tepat.
+Batasannya: kalau tab yang berbunyi sedang tidak terlihat (tab lain di jendela
+itu yang aktif), judulnya tidak bisa dicocokkan; PowerTools lalu memakai PWA
+yang ada — atau nama browser kalau tidak ada PWA. Discord juga hanya bisa
+menampilkan **satu** activity, yaitu sesi media terakhir yang berubah. Spotify
+desktop, VLC, dan mpv selalu terdeteksi tepat.
 
 #### Cover album
 
@@ -322,8 +324,15 @@ gratis, tanpa API key, dan menyediakan lirik sinkron (LRC) untuk ribuan lagu.
 
 ![Lirik mengambang: gulir otomatis, sorotan baris, klik dua kali untuk lompat](docs/gifs/lyrics.gif)
 
-- Lagu dibaca dari **MPRIS**, jadi berlaku untuk Spotify, VLC, mpv, Firefox,
-  Chromium (YouTube/YouTube Music), dan pemutar lain — sama seperti island.
+- Lagu dibaca dari **MPRIS**, jadi berlaku untuk Spotify, VLC, mpv, YouTube
+  Music, dan pemutar lain — sama seperti island.
+- **Lirik hanya mengikuti musik, bukan video.** Pemutar browser cuma punya satu
+  sesi media, jadi membuka tab YouTube (video acak) bisa tiba-tiba mengganti
+  lagu yang dilaporkan MPRIS. Karena itu sumber video (`youtube`, `netflix`)
+  tidak pernah memicu pencarian lirik: lirik lagu terakhir tetap tampil dengan
+  status "Video diputar", dan pencarian baru hanya terjadi saat lagu berikutnya
+  diputar. Kalau belum ada lagu sama sekali, jendela menampilkan "Lirik tidak
+  tersedia untuk video".
 - Baris yang sedang dinyanyikan **disorot tebal**, baris tetangganya sedikit
   lebih terang, sisanya redup. Scroll dianimasikan halus, bukan lompat.
 - Kalau lirik tidak punya timestamp, teks tetap ditampilkan (tanpa sorotan).
@@ -914,6 +923,9 @@ mati dan `gnome-extensions info` menampilkan `State: INITIALIZED` dengan
 | Sumber di Pengaturan tidak cocok dengan aplikasi yang terbuka | Daftar diambil dari pemutar MPRIS yang benar-benar terbuka; tekan **Muat ulang daftar aplikasi**. Pemutar tanpa sesi media (belum memutar apa pun) belum punya nama MPRIS, jadi belum muncul. |
 | Aplikasi web (PWA) tidak terdeteksi terpisah dari browsernya | Pembedaan PWA memakai daftar jendela dari ekstensi GNOME, dan kode ekstensi hanya dimuat saat login. Jalankan `./install.sh`, lalu **logout dan login lagi**; Pengaturan menampilkan peringatan selama metode itu belum tersedia. |
 | Dua tab browser memakai judul yang sama | MPRIS hanya satu pemutar per proses browser. Pasang layanan sebagai PWA (mis. YouTube Music) agar punya sumber sendiri, atau petakan baris browser ke preset yang paling sering dipakai. Lihat [sumber di browser](#sumber-di-browser-dan-aplikasi-web-pwa). |
+| Lirik tiba-tiba berganti ke video YouTube | Tidak akan terjadi lagi: sumber video (`youtube`, `netflix`) tidak memicu pencarian lirik. Kalau masih terjadi, cek baris **Sumber terdeteksi** di `powertools doctor` — sumbernya mungkin masih `brave` karena ekstensi GNOME belum diperbarui (logout/login sekali). |
+| PWA tetap terdeteksi sebagai `brave` | Cek `powertools doctor` → **Sumber terdeteksi**. Kalau sumbernya `brave` padahal PWA sedang memutar, jalankan `./install.sh` lalu logout/login: deteksi PWA butuh metode daftar jendela di ekstensi GNOME. |
+| Activity tidak terkirim sama sekali | Pastikan modul **Discord Listening** aktif dan aplikasi Discord desktop berjalan. Untuk sumber yang **tidak punya preset** (pemutar langka), pilih preset di baris sumber itu atau ubah **Sumber lain** ke **Otomatis (bawaan)** — pilihan "Tidak dikirim" membuat sumber seperti itu tidak dikirim. |
 | Judulnya "Listening to PowerTools", bukan nama pemutar | Discord memakai **nama aplikasi** preset, bukan nama pemutar. YouTube Music, Spotify, Netflix, dan YouTube punya preset sendiri; untuk sumber lain pilih baris sumbernya di **Pengaturan → Discord Listening** lalu ganti dropdown presetnya. Lihat [kata kerja dan judul](#kata-kerja-dan-judul-mengikuti-preset). |
 | Gambar album tampil "?" | Cover dari browser berupa file lokal `file:///tmp/...`, atau aplikasi Discord belum punya ikon. Unggah **App Icon** di General Information, dan/atau asset di **Rich Presence → Art Assets** lalu `powertools config set discord.fallback_asset <nama asset>`. Cek sumber dengan `powertools doctor`. |
 | Progress bar tidak bisa digeser | Pemutar tidak mengirim `CanSeek` atau panjang lagu. Ini batasan pemutarnya, bukan PowerTools. |
@@ -962,10 +974,17 @@ Hapus berkas itu (dan logout/login) setelah selesai.
   "Watching" untuk YouTube/Netflix) ditambah nama aplikasi preset tersebut,
   bukan nama pemutar musiknya. Fitur ini juga butuh
   `resident: true` supaya proses tetap hidup dan status terus diperbarui.
-- Browser biasanya hanya mengekspos **satu sesi media aktif** per proses, jadi
-  dua tab YouTube yang berputar bersamaan bisa tampil sebagai satu pemutar
-  (Chromium/Firefox), bukan dua. PWA yang dipasang lewat browser punya proses
-  sendiri, sehingga bisa dibedakan dari tab biasa.
+- Browser hanya mengekspos **satu sesi media aktif** per proses, jadi dua tab
+  YouTube yang berputar bersamaan bisa tampil sebagai satu pemutar
+  (Chromium/Firefox), bukan dua. PWA dibedakan dari tab lewat **jendelanya**,
+  bukan lewat proses: Brave/Chromium menjalankan PWA di proses browser yang
+  sama. Kalau tab yang berbunyi sedang tidak terlihat (tab lain aktif di jendela
+  itu), judulnya tidak bisa dicocokkan dan PowerTools memakai PWA yang ada atau
+  nama browser.
+- Lirik hanya untuk musik. Sumber video (`youtube`, `netflix`) tidak memicu
+  pencarian lirik; lagu terakhir tetap tampil. Lirik untuk video musik di
+  YouTube karena itu tidak tersedia — putar lagunya lewat YouTube Music atau
+  Spotify.
 - Progress bar baru bisa digeser kalau pemutar mengirim `CanSeek` dan panjang
   lagu (`mpris:length`). Kalau pemutar tidak menyediakan `Position`, perkiraan
   waktu berjalan dari waktu pemutaran lokal dan bisa sedikit melenceng.

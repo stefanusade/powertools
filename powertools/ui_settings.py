@@ -813,10 +813,11 @@ class SettingsWindow(Gtk.ApplicationWindow):
         texts.append(name)
 
         detail = Gtk.Label(
-            label="Dipakai kalau sumbernya belum punya pilihan sendiri."
+            label="Hanya untuk sumber tanpa preset sendiri; sumber yang "
+                  "punya preset tidak terpengaruh."
                   if self._discord_use_builtin()
-                  else "Preset dimatikan: sumber tanpa pilihan tidak dikirim "
-                       "ke Discord.",
+                  else "Sumber tanpa preset tidak dikirim; sumber dengan "
+                       "preset tetap dikirim.",
             xalign=0, wrap=True)
         detail.add_css_class("pt-faint")
         texts.append(detail)

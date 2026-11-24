@@ -165,6 +165,9 @@ class LyricsWindow(Gtk.ApplicationWindow):
         self._cfg = cfg
         self._track = None
         self._track_key = ""
+        #: True saat pemutar melaporkan video. Lirik lagu terakhir tetap
+        #: tampil, tetapi tidak bisa dilompati karena pemutarnya bukan lagu itu.
+        self._video_playing = False
         self._lyrics: lyrics.Lyrics | None = None
         self._rows: list[Gtk.Widget] = []
         self._labels: list[Gtk.Label] = []
@@ -377,6 +380,7 @@ class LyricsWindow(Gtk.ApplicationWindow):
         if track is None:
             self._track = None
             self._track_key = ""
+            self._video_playing = False
             self._lyrics = None
             self._rows = []
             self._labels = []
@@ -398,6 +402,7 @@ class LyricsWindow(Gtk.ApplicationWindow):
 
         key = getattr(track, "key", "")
         self._track = track
+        self._video_playing = False
         self._title.set_label(getattr(track, "title", "") or "Tanpa judul")
         self._artist.set_label(
             getattr(track, "artist", "")
@@ -424,6 +429,30 @@ class LyricsWindow(Gtk.ApplicationWindow):
         self._update_time()
         if self.get_visible():
             self._start_fetch()
+
+    def set_video(self, track) -> None:
+        """Tandai bahwa yang diputar sekarang video, bukan lagu.
+
+        Lirik lagu yang sudah tampil dibiarkan apa adanya: pemutar browser
+        hanya punya satu sesi media, jadi video acak di tab lain tidak boleh
+        mengosongkan lirik yang sedang dibaca. Kalau belum ada lagu sama
+        sekali, judul video ditampilkan tanpa mencari lirik.
+        """
+        if self._destroyed or track is None:
+            return
+        if self._track is not None:
+            self._video_playing = True
+            self._status.set_label("Video diputar · lirik lagu terakhir ditahan")
+            return
+        self._title.set_label(getattr(track, "title", "") or "Video")
+        self._artist.set_label("Video · lirik tidak tersedia")
+        self._clear_lines()
+        self._add_placeholder("Lirik tidak tersedia untuk video.")
+        self._status.set_label("")
+        self._spinner.stop()
+        self._spinner.set_visible(False)
+        self._romaji_button.set_visible(False)
+        self._update_time()
 
     def set_position(self, seconds: float, playing: bool = False) -> None:
         if self._destroyed:
@@ -797,7 +826,12 @@ class LyricsWindow(Gtk.ApplicationWindow):
             except Exception:
                 ok = False
         if not ok:
-            self._flash_status("Pemutar ini tidak mendukung lompat waktu")
+            self._flash_status(
+                "Video sedang diputar — lirik lagu terakhir tidak bisa "
+                "dilompati"
+                if self._video_playing
+                else "Pemutar ini tidak mendukung lompat waktu"
+            )
             return
         # Gulir manual yang baru dilakukan tidak boleh menahan sorotan.
         self._manual_until = 0.0

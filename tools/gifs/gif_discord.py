@@ -81,7 +81,8 @@ def on_activate(application):
     # "Sumber lain" → tidak dikirim ke Discord
     scene.at(7.0, pick("default", 1))
     # Kembali ke Otomatis supaya terlihat pilihannya bisa diganti lagi.
-    scene.at(8.2, pick("spotify", 0))
+    scene.at(8.2, pick("default", 0))
+    scene.at(8.4, pick("spotify", 0))
     scene.at(8.6, lambda: window._select_page("general"))
     scene.at(9.2, lambda: window._select_page("discord"))
 

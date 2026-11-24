@@ -20,7 +20,12 @@ from .color import ColorPicker
 from .dbusutil import session_bus
 from .discord import DiscordPresence, build_activity, valid_app_id
 from .mpris import MprisWatcher
-from .sources import activity_type_for, resolve_app_id
+from .sources import (
+    APP_PRESETS,
+    WATCHING_SOURCES,
+    activity_type_for,
+    resolve_app_id,
+)
 from .store import ClipStore
 from .ui_clipboard import ClipboardWindow
 from .ui_color import ColorResultWindow
@@ -31,6 +36,17 @@ from .ui_settings import SettingsWindow
 CAPTURE_EXTENSION = "extension"
 CAPTURE_POLL = "poll"
 CAPTURE_NONE = "none"
+
+
+def _is_video(track) -> bool:
+    """True kalau track ini video (YouTube/Netflix), bukan lagu.
+
+    Lirik hanya masuk akal untuk musik, dan pemutar browser bisa tiba-tiba
+    melaporkan video acak saat tab lain dibuka. Dengan memisahkannya, lirik
+    lagu yang sedang tampil tidak ikut berganti.
+    """
+    source = str(getattr(track, "source", "") or "").strip().lower()
+    return source in WATCHING_SOURCES and bool(getattr(track, "title", ""))
 
 
 class PowerToolsApp(Gtk.Application):
@@ -61,6 +77,7 @@ class PowerToolsApp(Gtk.Application):
         self._poller: ClipboardPoller | None = None
         self._mpris: MprisWatcher | None = None
         self._lyrics_track = None
+        self._lyrics_video = None
         self._lyrics_position = 0.0
         self._lyrics_playing = False
         self._discord: DiscordPresence | None = None
@@ -267,6 +284,10 @@ class PowerToolsApp(Gtk.Application):
         if self._lyrics_window is None:
             window = LyricsWindow(self, self.cfg)
             window.set_track(self._lyrics_track)
+            if self._lyrics_video is not None:
+                # Video sedang diputar: tampilkan statusnya, tetapi jangan
+                # mencari lirik untuk video.
+                window.set_video(self._lyrics_video)
             window.set_position(self._lyrics_position, self._lyrics_playing)
             self._lyrics_window = window
         return self._lyrics_window
@@ -474,8 +495,8 @@ class PowerToolsApp(Gtk.Application):
     def _discord_app_id_for(self, track) -> str:
         """Application ID yang dipakai untuk lagu ini.
 
-        Urutan: pemetaan sumber → `default` → ID bawaan sumber → `app_id`
-        → ID bawaan `default`. Lihat ``sources.resolve_app_id``.
+        Urutan: pemetaan sumber → preset sumber → `default` → `app_id` →
+        preset `default`. Lihat ``sources.resolve_app_id``.
         """
         source = ""
         if track is not None:
@@ -488,10 +509,15 @@ class PowerToolsApp(Gtk.Application):
         )
 
     def _discord_active(self) -> bool:
-        """Modul Discord butuh MPRIS kalau ada Application ID yang bisa dipakai."""
+        """Modul Discord butuh MPRIS selama masih ada ID yang bisa dipakai."""
         if not self.cfg.module_enabled("discord"):
             return False
-        return bool(self._discord_app_id_for(None) or self._discord_mapping())
+        if self._discord_mapping() or self._discord_app_id_for(None):
+            return True
+        # Preset per sumber selalu berlaku, jadi pemantau tetap harus jalan
+        # walau saklar cadangan dimatikan dan pengguna belum memetakan apa pun.
+        # Tanpa ini, tidak ada track yang pernah sampai ke Discord.
+        return any(valid_app_id(preset["app_id"]) for preset in APP_PRESETS)
 
     def _sync_watcher(self) -> None:
         """Hentikan pemantau hanya kalau tidak ada fitur yang membutuhkannya."""
@@ -508,6 +534,7 @@ class PowerToolsApp(Gtk.Application):
 
     def _stop_lyrics(self) -> None:
         self._lyrics_track = None
+        self._lyrics_video = None
         self._lyrics_position = 0.0
         self._lyrics_playing = False
         if self._lyrics_window is not None:
@@ -536,6 +563,14 @@ class PowerToolsApp(Gtk.Application):
         self._on_discord_position(seconds, playing)
 
     def _on_lyrics_track(self, track) -> None:
+        if track is not None and _is_video(track):
+            # Video (YouTube/Netflix) bukan lagu: jangan ganti lirik lagu yang
+            # sedang tampil, dan jangan cari lirik untuk video acak.
+            self._lyrics_video = track
+            if self._lyrics_window is not None:
+                self._lyrics_window.set_video(track)
+            return
+        self._lyrics_video = None
         self._lyrics_track = track
         if self._lyrics_window is not None:
             self._lyrics_window.set_track(track)
@@ -552,6 +587,9 @@ class PowerToolsApp(Gtk.Application):
         self._show_lyrics(focus=False)
 
     def _on_lyrics_position(self, seconds: float, playing: bool) -> None:
+        if self._lyrics_video is not None:
+            # Posisi milik video, bukan lagu yang liriknya tampil.
+            return
         self._lyrics_position = max(0.0, float(seconds or 0))
         self._lyrics_playing = bool(playing)
         if self._lyrics_window is not None:
@@ -568,13 +606,26 @@ class PowerToolsApp(Gtk.Application):
             self._stop_discord()
             return
 
-        app_id = self._discord_app_id_for(self._discord_track)
+        # Saat dipanggil dari _on_media_track, _discord_track belum tentu
+        # terisi; pemantau MPRIS sudah menyimpan lagu barunya.
+        track = self._discord_track
+        if track is None and self._mpris is not None:
+            track = self._mpris.current_track
+        app_id = self._discord_app_id_for(track)
         if not app_id:
+            # Belum ada lagu (atau sumbernya belum jelas), tetapi preset per
+            # sumber tetap bisa dipakai begitu lagu pertama datang. Pemantau
+            # MPRIS harus jalan sekarang, kalau tidak tidak ada track yang
+            # pernah sampai ke Discord.
+            if self._discord_active():
+                self._ensure_watcher()
             raw = str(self.cfg.get("discord.app_id", "") or "").strip()
             self._stop_discord(keep_status=True)
-            if not self._discord_use_builtin():
+            if track is None:
+                self._set_discord_status("Menunggu media diputar")
+            elif not self._discord_use_builtin():
                 self._set_discord_status(
-                    "Preset dimatikan dan sumber ini belum dipetakan — "
+                    "Sumber ini tidak punya preset dan cadangan dimatikan — "
                     "pilih preset di Pengaturan → Discord Listening"
                 )
             else:
@@ -597,9 +648,7 @@ class PowerToolsApp(Gtk.Application):
             self._discord = DiscordPresence(
                 app_id, on_status=self._on_discord_status
             )
-            self._discord_track = (
-                self._mpris.current_track if self._mpris is not None else None
-            )
+            self._discord_track = track
             self._discord_position = 0.0
             self._discord_playing = (
                 bool(self._discord_track.playing) if self._discord_track else False
@@ -771,14 +820,21 @@ class PowerToolsApp(Gtk.Application):
         Jendela sudah menghitung offset lirik, jadi yang masuk ke sini adalah
         posisi pemutar yang sebenarnya. Return False kalau pemutar tidak ada
         atau menolak (mis. ``CanSeek`` bernilai false).
+
+        Seek dikunci ke lagu yang liriknya tampil: kalau pemutar aktif sudah
+        berganti ke video/tab lain, lompatan dibatalkan daripada menggeser
+        media yang salah.
         """
         if self._mpris is None or not self.cfg.module_enabled("lyrics"):
+            return False
+        if self._lyrics_video is not None or self._lyrics_track is None:
             return False
         try:
             target = max(0.0, float(seconds))
         except (TypeError, ValueError):
             return False
-        if not self._mpris.seek(target):
+        key = str(getattr(self._lyrics_track, "key", "") or "")
+        if not self._mpris.seek(target, key=key):
             return False
         self._lyrics_position = target
         if self._lyrics_window is not None:

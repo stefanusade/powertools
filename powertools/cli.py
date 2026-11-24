@@ -195,8 +195,7 @@ def _detected_source() -> tuple[str, str, str] | None:
     try:
         from .dbusutil import session_bus
         from .mpris import BUS_PREFIX, OBJECT_PATH
-        from .sources import source_key
-        from .webapps import app_name_for_owner
+        from .sources import detect_source
     except Exception:
         return None
 
@@ -254,13 +253,7 @@ def _detected_source() -> tuple[str, str, str] | None:
         album = str(metadata.get("xesam:album") or "").strip()
         url = str(metadata.get("xesam:url") or "").strip()
         art = str(metadata.get("mpris:artUrl") or "").strip()
-        source = source_key(
-            owner,
-            title,
-            album,
-            app_name=app_name_for_owner(owner, title),
-            url=url,
-        )
+        source = detect_source(owner, title, album, url=url)
         return source, title, art
     return None
 
@@ -287,6 +280,8 @@ def _doctor() -> int:
     print(f"Ekstensi terpasang: {'ya' if _extension_installed() else 'TIDAK'}")
     bridge_ok = _name_owned(BRIDGE_NAME)
     print(f"Jembatan aktif   : {'ya' if bridge_ok else 'tidak'}")
+    if bridge_ok:
+        print(f"Deteksi PWA      : {_windows_bridge_status()}")
     print(f"Aplikasi berjalan: {'ya' if _name_owned(config.APP_ID) else 'tidak'}")
     autostart, has_autostart = _autostart_status()
     print(f"Autostart        : {autostart}")
@@ -366,24 +361,14 @@ def _doctor() -> int:
         if not isinstance(use_builtin, bool):
             use_builtin = True
 
-        if not app_id and not valid_map and not use_builtin:
-            print("Discord          : aktif, tapi Application ID belum diisi")
-        elif (
-            app_id
-            and not valid_app_id(app_id)
-            and not valid_map
-            and not use_builtin
-        ):
-            print("Discord          : aktif, tapi Application ID tidak valid")
-        else:
-            try:
-                found = any(path.exists() for path in socket_candidates())
-            except OSError:
-                found = False
-            print(
-                "Discord          : aktif "
-                f"(socket {'ditemukan' if found else 'belum ada'})"
-            )
+        try:
+            found = any(path.exists() for path in socket_candidates())
+        except OSError:
+            found = False
+        print(
+            "Discord          : aktif "
+            f"(socket {'ditemukan' if found else 'belum ada'})"
+        )
         if valid_map:
             pairs = []
             for key, value in sorted(valid_map.items()):
@@ -391,12 +376,14 @@ def _doctor() -> int:
                 name = preset["label"] if preset else "ID lama"
                 pairs.append(f"{source_label(key)}={name}")
             print(f"Discord sumber   : {', '.join(pairs)}")
-        if use_builtin:
-            pairs = ", ".join(
-                f"{preset['label']}={preset['app_id']}"
-                for preset in APP_PRESETS
-            )
-            print(f"Discord preset   : {pairs}")
+        # Preset per sumber selalu berlaku; saklar hanya mengatur cadangan.
+        pairs = ", ".join(
+            f"{preset['label']}={preset['app_id']}"
+            for preset in APP_PRESETS
+        )
+        print(f"Discord preset   : {pairs}")
+        if not use_builtin:
+            print("Discord cadangan : tidak dikirim untuk sumber tanpa preset")
 
         detected = _detected_source()
         if detected is not None:
@@ -409,7 +396,7 @@ def _doctor() -> int:
             )
             if source in valid_map:
                 origin = "pilihan di Pengaturan"
-            elif use_builtin and source in BUILTIN_APP_IDS:
+            elif source in BUILTIN_APP_IDS:
                 origin = "preset sumber"
             elif valid_app_id(app_id):
                 origin = "ID lama"
@@ -445,6 +432,25 @@ def _doctor() -> int:
     ):
         print("Catatan          : di Wayland, clipboard otomatis butuh ekstensi GNOME aktif.")
     return 0
+
+
+def _windows_bridge_status() -> str:
+    """Apakah ekstensi yang **berjalan** sudah bisa memberi daftar jendela.
+
+    Kode ekstensi hanya dimuat saat login, jadi setelah memperbarui PowerTools
+    metode ini belum ada sampai pengguna logout/login sekali.
+    """
+    try:
+        from .dbusutil import bridge_windows_available
+    except Exception:
+        return "tidak diketahui"
+    try:
+        if bridge_windows_available():
+            return "ya (jendela + aplikasi web)"
+    except Exception:
+        pass
+    return ("belum — jalankan ./install.sh lalu logout/login sekali "
+            "(kode ekstensi lama masih berjalan)")
 
 
 def _extension_installed() -> bool:

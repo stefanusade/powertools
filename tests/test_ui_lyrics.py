@@ -321,5 +321,56 @@ class SeekTests(unittest.TestCase):
         self.assertIsNone(window._plain_rows[0].get_tooltip_text())
 
 
+@unittest.skipUnless(GTK_READY, "GTK 4 tidak tersedia")
+class VideoTrackTests(unittest.TestCase):
+    """Video tidak boleh mengosongkan lirik lagu yang sedang dibaca."""
+
+    class Track:
+        def __init__(self, title="Lagu", artist="Penyanyi", source="spotify"):
+            self.key = f"{source}:{title}"
+            self.title = title
+            self.artist = artist
+            self.album = ""
+            self.length_us = 0
+            self.playing = True
+            self.owner = f"org.mpris.MediaPlayer2.{source}"
+            self.source = source
+
+    def test_lirik_lagu_ditahan_saat_video_diputar(self):
+        window = _make_window(self)
+        window.set_track(self.Track())
+        window._lyrics = lyrics.Lyrics(plain=["baris lirik"])
+        window._render_lyrics(window._lyrics)
+
+        window.set_video(self.Track(
+            "(529) Red Alert 2 | Yuri's Revenge | 7 vs 1", source="youtube"))
+
+        self.assertEqual(window._track.title, "Lagu")
+        self.assertEqual(window._labels or window._plain_rows, window._plain_rows)
+        self.assertEqual(window._title.get_label(), "Lagu")
+        self.assertIn("Video diputar", window._status.get_label())
+
+    def test_klasifikasi_video(self):
+        from powertools.service import _is_video
+
+        self.assertTrue(_is_video(self.Track("Video panjang", source="youtube")))
+        self.assertTrue(_is_video(self.Track("Film", source="netflix")))
+        self.assertFalse(_is_video(self.Track("Lagu", source="spotify")))
+        self.assertFalse(
+            _is_video(self.Track("Lagu", source="youtube-music")))
+        # Judul kosong bukan bukti apa pun; jangan menahan lirik karenanya.
+        self.assertFalse(_is_video(self.Track("", source="youtube")))
+
+    def test_tanpa_lagu_video_ditampilkan_tanpa_pencarian(self):
+        window = _make_window(self)
+        window.set_video(self.Track(
+            "(529) Red Alert 2 | Yuri's Revenge", source="youtube"))
+        self.assertIsNone(window._track)
+        self.assertEqual(window._title.get_label(),
+                         "(529) Red Alert 2 | Yuri's Revenge")
+        teks = " ".join(label.get_label() for label in window._labels)
+        self.assertIn("tidak tersedia untuk video", teks)
+
+
 if __name__ == "__main__":
     unittest.main()

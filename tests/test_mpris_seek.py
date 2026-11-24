@@ -115,6 +115,17 @@ class SeekTests(unittest.TestCase):
         watcher = mpris.MprisWatcher(lambda _track: None, lambda _s, _p: None)
         self.assertFalse(watcher.seek(10))
 
+    def test_kunci_lagu_menolak_seek_ke_media_lain(self):
+        # Browser memakai satu pemutar untuk semua tab: lirik lagu lama tidak
+        # boleh menggeser video yang sedang diputar.
+        watcher, player = self._watcher()
+        key = mpris._track_key(player.metadata())
+        self.assertFalse(watcher.seek(10, key="lagu:lain"))
+        self.assertEqual(player.proxy.calls, [])
+
+        self.assertTrue(watcher.seek(10, key=key))
+        self.assertEqual(player.proxy.calls[0][1], "SetPosition")
+
     def test_poll_lama_tidak_menimpa_posisi_baru(self):
         watcher, player = self._watcher()
         before = player.position_token

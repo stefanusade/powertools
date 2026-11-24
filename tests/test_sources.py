@@ -190,12 +190,17 @@ class BuiltinAppIdTests(unittest.TestCase):
             "444444444444444444",
         )
 
-    def test_saklar_mati_mematikan_bawaan(self):
+    def test_saklar_mati_hanya_mematikan_cadangan(self):
+        # "Sumber lain → Tidak dikirim" hanya berlaku untuk sumber yang tidak
+        # punya preset sendiri; "Watching YouTube" tetap jalan.
         self.assertEqual(
-            resolve_app_id("youtube-music", use_builtin=False), "")
+            resolve_app_id("youtube-music", use_builtin=False),
+            BUILTIN_APP_IDS["youtube-music"],
+        )
+        self.assertEqual(resolve_app_id("vlc", use_builtin=False), "")
         self.assertEqual(
             resolve_app_id(
-                "youtube-music",
+                "vlc",
                 app_id="333333333333333333",
                 use_builtin=False,
             ),

@@ -216,10 +216,15 @@ def resolve_app_id(
     Urutan, yang pertama menang — dari yang paling spesifik ke paling umum:
 
     1. ``app_ids[sumber]`` — pilihan eksplisit pengguna
-    2. Application ID bawaan untuk sumber itu (kalau ``use_builtin``)
+    2. preset bawaan untuk sumber itu (mis. ``youtube``, ``spotify``)
     3. ``app_ids["default"]`` — cadangan eksplisit pengguna
     4. ``app_id`` — ID utama pengguna
-    5. Application ID bawaan ``default`` (kalau ``use_builtin``)
+    5. preset bawaan ``default`` (kalau ``use_builtin``)
+
+    Preset per sumber selalu berlaku walau ``use_builtin`` dimatikan: saklar
+    itu hanya mengatur sumber yang **tidak** punya preset sendiri, sesuai
+    labelnya di Pengaturan ("Sumber lain → Tidak dikirim"). Mematikannya tidak
+    boleh ikut mematikan "Watching YouTube" untuk sumber YouTube.
 
     Bawaan per sumber berada di atas ``app_id`` dengan sengaja: pengguna lama
     sudah punya ``app_id`` terisi, jadi tanpa urutan ini aplikasi khusus
@@ -236,7 +241,7 @@ def resolve_app_id(
     if key and key in clean:
         return clean[key]
 
-    if use_builtin and key and valid_app_id(BUILTIN_APP_IDS.get(key)):
+    if key and valid_app_id(BUILTIN_APP_IDS.get(key)):
         return str(BUILTIN_APP_IDS[key]).strip()
 
     if "default" in clean:
@@ -271,19 +276,23 @@ def source_key(
     album: str = "",
     *,
     app_name: str = "",
+    window_title: str = "",
     url: str = "",
 ) -> str:
     """Kunci sumber yang stabil untuk pemilihan Application ID Discord.
 
     Contoh: ``org.mpris.MediaPlayer2.brave.instance282140`` → ``brave``.
 
-    For browser, kunci bisa lebih spesifik, berurutan:
+    Untuk browser, kunci bisa lebih spesifik, berurutan:
 
     1. ``app_name`` — PWA yang terbukti sedang memutar (dari kelas jendela +
        judul lagu; lihat ``webapps``).
     2. ``url`` — kalau pemutar mengirim ``xesam:url``.
-    3. judul/album — sebagian situs menyertakan namanya di metadata.
-    4. nama browser itu sendiri.
+    3. ``window_title`` — judul jendela sumber. MPRIS tidak menyebut situs,
+       tetapi jendela YouTube berjudul "… - YouTube", jadi ini satu-satunya
+       petunjuk situs untuk tab biasa.
+    4. judul/album — sebagian situs menyertakan namanya di metadata.
+    5. nama browser itu sendiri.
     """
     name = str(owner or "").strip()
     prefix = "org.mpris.MediaPlayer2."
@@ -301,6 +310,9 @@ def source_key(
         for needle, mapped in URL_HINTS:
             if needle in lowered_url:
                 return mapped
+        hinted = _hinted_source(window_title)
+        if hinted:
+            return hinted
         hinted = _hinted_source(f"{title} {album}")
         if hinted:
             return hinted
@@ -310,3 +322,28 @@ def source_key(
         if slug:
             return slug
     return key
+
+
+def detect_source(
+    owner: str,
+    title: str = "",
+    album: str = "",
+    *,
+    url: str = "",
+) -> str:
+    """Kunci sumber pemutar MPRIS, termasuk deteksi PWA dan jendela.
+
+    Penggabung tipis ``webapps.context_for_owner`` + ``source_key`` supaya
+    pemanggil (pemantau MPRIS, ``doctor``) tidak perlu tahu detailnya.
+    """
+    from .webapps import context_for_owner
+
+    context = context_for_owner(owner, title)
+    return source_key(
+        owner,
+        title,
+        album,
+        app_name=context.app_name,
+        window_title=context.window_title,
+        url=url,
+    )

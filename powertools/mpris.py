@@ -15,8 +15,7 @@ from typing import Callable
 from gi.repository import Gio, GLib
 
 from .dbusutil import session_bus
-from .sources import source_key
-from .webapps import app_name_for_owner
+from .sources import detect_source
 
 BUS_PREFIX = "org.mpris.MediaPlayer2"
 PLAYER_IFACE = "org.mpris.MediaPlayer2.Player"
@@ -110,11 +109,10 @@ def list_sources() -> list[SourceInfo]:
         metadata = _parse_metadata(props.get("Metadata"))
         if metadata is None:
             continue
-        source = source_key(
+        source = detect_source(
             name,
             metadata["title"],
             metadata["album"],
-            app_name=app_name_for_owner(name, metadata["title"]),
             url=metadata.get("url", ""),
         )
         info = SourceInfo(
@@ -538,12 +536,10 @@ class MprisWatcher:
                     owner=active.owner,
                     track_id=str(metadata.get("track_id") or ""),
                     art_url=str(metadata.get("art_url") or ""),
-                    source=source_key(
+                    source=detect_source(
                         active.owner,
                         str(metadata.get("title") or ""),
                         str(metadata.get("album") or ""),
-                        app_name=app_name_for_owner(
-                            active.owner, str(metadata.get("title") or "")),
                         url=str(metadata.get("url") or ""),
                     ),
                 )
@@ -616,7 +612,7 @@ class MprisWatcher:
         player.position_token += 1
 
     # ------------------------------------------------------------------- seek
-    def seek(self, seconds: float) -> bool:
+    def seek(self, seconds: float, key: str = "") -> bool:
         """Lompat ke detik tertentu pada pemutar yang sedang aktif.
 
         ``SetPosition`` dipakai kalau pemutar memberi ``mpris:trackid`` yang
@@ -624,11 +620,19 @@ class MprisWatcher:
         Setelah berhasil, posisi perkiraan langsung digeser dan token poll
         dinaikkan, supaya jawaban ``Position`` yang masih di jalan tidak
         mengembalikan lirik/island ke posisi lama.
+
+        ``key`` (opsional) adalah kunci lagu yang dimaksud. Kalau pemutar aktif
+        sudah berganti ke media lain — biasa terjadi di browser, satu proses
+        untuk semua tab — seek ditolak supaya lirik lagu lama tidak melompat di
+        video yang sedang diputar.
         """
         if self._destroyed:
             return False
         player = self._active
         if player is None or player.proxy is None:
+            return False
+
+        if key and _track_key(player.metadata()) != key:
             return False
 
         can_seek = player.cached("CanSeek", True)
