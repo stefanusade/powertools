@@ -134,6 +134,18 @@ class WindowMatchTests(unittest.TestCase):
         ]
         self.assertEqual(pwa_id_from_windows("Lagu", windows), "")
 
+    def test_judul_jendela_yang_dipotong(self):
+        # Jendela memotong judul panjang; lagunya tetap harus dikenali.
+        windows = [
+            (self.PWA, "ANTIFRAGILE - LE SSERAFIM…"),
+            (self.BROWSER, "Beranda - Brave"),
+        ]
+        self.assertEqual(
+            pwa_id_from_windows(
+                "ANTIFRAGILE - LE SSERAFIM - YouTube Music", windows),
+            PWA_ID,
+        )
+
     def test_semua_jendela_pwa_yang_sama(self):
         windows = [(self.PWA, "YouTube Music"), (self.PWA, "Antrian")]
         self.assertEqual(

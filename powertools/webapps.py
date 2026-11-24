@@ -168,20 +168,33 @@ def app_id_from_class(wm_class: object) -> str:
 
 
 def _normalise(text: object) -> str:
-    return " ".join(str(text or "").lower().split())
+    """Huruf kecil, spasi tunggal, tanpa elipsis di ujung.
+
+    Elipsis di ujung judul jendela berarti judulnya dipotong, bukan bagian
+    dari nama lagu.
+    """
+    value = " ".join(str(text or "").lower().split())
+    for tail in ("…", "..."):
+        if value.endswith(tail):
+            value = value[: -len(tail)].rstrip()
+    return value
 
 
 def _title_matches(track_title: str, window_title: str) -> bool:
-    """True kalau judul lagu muncul di judul jendela.
+    """True kalau judul lagu dan judul jendela menunjuk lagu yang sama.
 
-    Judul jendela biasanya menambahkan nama browser ("… - Brave") atau nama
-    aplikasi ("… - YouTube Music"), jadi pencocokan dilakukan pada isi judul.
+    Judul jendela biasanya menambahkan nama situs/browser ("… - YouTube
+    Music"), dan sebagian jendela memotong judul panjang dengan "…". Jadi
+    dicocokkan dua arah, dengan panjang minimum supaya judul pendek tidak
+    dianggap bukti.
     """
     needle = _normalise(track_title)
-    if len(needle) < MIN_TITLE:
-        return False
     haystack = _normalise(window_title)
-    return bool(haystack) and needle in haystack
+    if len(needle) < MIN_TITLE or not haystack:
+        return False
+    if needle in haystack:
+        return True
+    return len(haystack) >= MIN_TITLE and haystack in needle
 
 
 def pwa_id_from_windows(
